@@ -20,11 +20,12 @@ public enum DataType {
 		public Object extractFieldValue(ResultSet rs, String fieldName) throws SQLException {
 			return rs.getObject( fieldName );
 		}
-		
 	},
 	
 	/*
-	 * Predefined data types with known conversion functions
+	 * Predefined data types with known conversion functions 
+	 * (actually the automatic mapper should be working for all that primitive types,
+	 * but they are added here as an example)
 	 */
 	
 	INT2 {

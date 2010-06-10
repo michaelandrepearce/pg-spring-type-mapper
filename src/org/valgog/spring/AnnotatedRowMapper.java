@@ -35,8 +35,12 @@ public class AnnotatedRowMapper<ITEM>
 	
 	private Class<ITEM> itemType;
 
-	public AnnotatedRowMapper( Class<ITEM> itemType ) {
+	private AnnotatedRowMapper( Class<ITEM> itemType ) {
 		this.itemType = itemType; 
+	}
+	
+	public static final <ItemTYPE> AnnotatedRowMapper<ItemTYPE> getMapperForClass(Class<ItemTYPE> itemClass) {
+		return new AnnotatedRowMapper<ItemTYPE>(itemClass);
 	}
 	
 	private ITEM newItemInstance() {
@@ -87,7 +91,7 @@ public class AnnotatedRowMapper<ITEM>
 	 * @see DatabaseFieldName
 	 * @see DataType
 	 */
-	public static final <ItemTYPE> void extractAnnotatedFieldValues(Class<ItemTYPE> itemClass, ResultSet rs, ItemTYPE item) throws SQLException {
+	private static final <ItemTYPE> void extractAnnotatedFieldValues(Class<ItemTYPE> itemClass, ResultSet rs, ItemTYPE item) throws SQLException {
 		if ( itemClass == null ) throw new NullPointerException("itemClass should be not null");
 		if ( item == null ) throw new NullPointerException("item should be not null");
 		if ( rs == null ) throw new NullPointerException("rs should be not null");
