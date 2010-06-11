@@ -1,5 +1,7 @@
 package org.valgog.spring;
 
+import java.beans.BeanInfo;
+import java.beans.PropertyDescriptor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -97,7 +99,6 @@ public class AnnotatedRowMapper<ITEM>
 		if ( rs == null ) throw new NullPointerException("rs should be not null");
 
 		// we extract annotated properties from the item and set the values for them
-		
 		Method[] itemMethods = itemClass.getDeclaredMethods();
 		for (Method setter : itemMethods) {
 			if ( setter.isSynthetic() ) continue;
@@ -115,23 +116,20 @@ public class AnnotatedRowMapper<ITEM>
 			} catch (NoSuchFieldException e) {
 				continue;
 			}
+			Class<?> fieldType = field.getType();
+			
 			DatabaseFieldName annotation = field.getAnnotation(DatabaseFieldName.class);
-
 			// we have a needed annotation
-			DatabaseFieldName a = (DatabaseFieldName) annotation;
 			try {
-				DataType type = a.type();
-				String databaseFieldName = a.value();
+				DataType databaseFieldType = annotation.type();
+				String databaseFieldName = annotation.value();
 				if ( logger.isLoggable(Level.FINE) ) {
 					logger.fine("Property " + fieldName + " will be filled with the value of the database field [" + String.valueOf( databaseFieldName ) + "] "); 
 				}
-				Object value = type.extractFieldValue(rs, databaseFieldName);
+				Object value = databaseFieldType.extractFieldValue(rs, databaseFieldName, fieldType);
 				setter.invoke(item, value);
-			} catch (IllegalArgumentException e) {
-				StringBuilder sb = new StringBuilder();
-				sb.append("Trying to pass value of type ").append(a.type()).append(" to the method ");
-				sb.append(setter.getName()).append('(').append(setter.getParameterTypes()[0].getName()).append(')');
-				throw new IllegalArgumentException(sb.toString());
+			} catch (IllegalArgumentException e) {				
+				throw new IllegalArgumentException("Trying to pass value of type " + annotation.type() + " to the method " + setter.getName() + '(' + fieldType.getName() + ')');
 			} catch (IllegalAccessException e) {
 				logger.warning(e.getMessage());
 			} catch (InvocationTargetException e) {
