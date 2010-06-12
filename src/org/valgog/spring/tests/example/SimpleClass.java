@@ -1,22 +1,24 @@
 package org.valgog.spring.tests.example;
 
 import org.valgog.spring.annotations.DataType;
-import org.valgog.spring.annotations.DatabaseFieldName;
+import org.valgog.spring.annotations.DatabaseField;
+import org.valgog.spring.annotations.AllowPrimitiveDefaults;
 
 public class SimpleClass {
-	@DatabaseFieldName(value = "id")
+	
+	@DatabaseField(name = "id")
 	private int id;
 
-	@DatabaseFieldName(value = "name")
+	@DatabaseField(name = "name")
 	private String name;
 
-	@DatabaseFieldName(value = "country_code", type=DataType.COMMON_TEXT)
+	@DatabaseField(name = "country_code", type=DataType.COMMON_TEXT)
 	private String countryCode;
 
-	@DatabaseFieldName(value = "last_marks")
+	@DatabaseField @AllowPrimitiveDefaults
 	private int[] lastMarks;
 
-	@DatabaseFieldName(value = "tags")
+	@DatabaseField(name = "tags")
 	private String[] tags;
 
 	/*

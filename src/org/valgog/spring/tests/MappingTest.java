@@ -57,6 +57,19 @@ public class MappingTest extends TestCase {
 
 	public void testMapRow() throws SQLException {
 		
+		PreparedStatement ps = conn.prepareStatement("SELECT * FROM test.simple;");
+		ResultSet rs = ps.executeQuery();
+		AnnotatedRowMapper<SimpleClass> mapper = AnnotatedRowMapper.getMapperForClass(SimpleClass.class);
+		int i = 0;
+		while( rs.next() ) {
+			SimpleClass result = mapper.mapRow(rs, i++);
+			assertNotNull(result);
+		}
+
+	}
+
+	public void testPrimitiveMapRow() throws SQLException {
+		
 		PreparedStatement ps = conn.prepareStatement("SELECT null as id, 'Muster' as name, 'DE' as country_code, '{1,1,3,1, NULL}'::int4[] as last_marks, '{a,b,c}'::text[] as tags");
 		ResultSet rs = ps.executeQuery();
 		AnnotatedRowMapper<SimpleClass> mapper = AnnotatedRowMapper.getMapperForClass(SimpleClass.class);
@@ -65,10 +78,7 @@ public class MappingTest extends TestCase {
 			SimpleClass result = mapper.mapRow(rs, i++);
 			assertNotNull(result);
 		}
-		
-		
-		
 
-	}
-
+	}	
+	
 }

@@ -8,14 +8,14 @@ import java.lang.annotation.Target;
 
 
 /**
- * This annotation can be used to mark field of an object to be visible by the {@link AbstractAnnotatedRowMapper}
+ * This annotation can be used to mark field of an object to be visible by the {@link AnnotatedRowMapper}
  * @author valgog
  *
  */
 @Documented
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.FIELD)
-public @interface DatabaseFieldName {
-	String value();
+public @interface DatabaseField {
+	String name() default "";
 	DataType type() default DataType.AUTOMATIC;
 }

@@ -1,19 +1,21 @@
 package org.valgog.spring;
 
-import java.beans.BeanInfo;
-import java.beans.PropertyDescriptor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import org.springframework.jdbc.core.simple.ParameterizedRowMapper;
+import org.valgog.spring.annotations.AllowPrimitiveDefaults;
 import org.valgog.spring.annotations.DataType;
-import org.valgog.spring.annotations.DatabaseFieldName;
+import org.valgog.spring.annotations.DatabaseField;
 
 /**
  * This abstract class defines a row mapper to be able to map hierarchy of fields from the AbstractResultItem subclasses.
@@ -68,19 +70,80 @@ public class AnnotatedRowMapper<ITEM>
 		extractAnnotatedFieldValues(this.itemType, rs, item);
 	}
 	
+	private static final String rewriteJavaPropertyNameToLowercaseUnderscoreName(String javaPropertyName) {
+		if ( javaPropertyName == null ) throw new NullPointerException();
+		final int length = javaPropertyName.length();
+		StringBuilder r = new StringBuilder( length * 2 );
+		
+		// myFieldName -> my_field_name
+		// MyFileName -> my_field_name
+		// MyFILEName -> my_file_name
+		// I was too lazy to write a small automata here... so quick and dirty by now
+		boolean wasUpper = false;
+		for (int i = 0; i < length; i++) {
+			char ch = javaPropertyName.charAt(i);
+			
+			if ( Character.isUpperCase(ch) ) {
+				if ( i > 0 ) { 
+					if ( ( ! wasUpper ) && ( ch != '_' ) ) {
+						r.append('_');
+					}
+				}
+				ch = Character.toLowerCase(ch); 
+				wasUpper = true;
+			} else {
+				if ( wasUpper ) {
+					int p = r.length() - 2;
+					if ( p > 1 && r.charAt(p) != '_' ) {
+						r.insert(p, '_');
+					}
+				}
+				wasUpper = false;
+			}
+			r.append(ch);
+		}
+		return r.toString();
+	}
+	
+	private static final Map<Class<?>, List<MappingDescriptor>> mappingDescriptorCache = new HashMap<Class<?>, List<MappingDescriptor>>();
+	
+	private static final class MappingDescriptor {
+
+		private Field classField;
+		private String databaseFieldName;
+		private boolean allowPrimitiveDefaults;
+		
+		public MappingDescriptor(Field classField, String databaseFieldName, boolean allowPrimitiveDefaults) {
+			this.classField = classField;
+			this.databaseFieldName = databaseFieldName;
+			this.allowPrimitiveDefaults = allowPrimitiveDefaults;
+		}
+		
+		public Field getClassField() {
+			return classField;
+		}
+		public String getDatabaseFieldName() {
+			return databaseFieldName;
+		}
+		public boolean isAllowPrimitiveDefaults() {
+			return allowPrimitiveDefaults;
+		}
+		
+	}
+	
 	/**
 	 * This method can be used to extract the values of the annotated fields. 
-	 * Annotation should be done by the annotation {@link DatabaseFieldName}.
+	 * Annotation should be done by the annotation {@link DatabaseField}.
 	 * 
 	 * Here is an example of the field declaration:
 	 * <pre>
-	 * {@code @}DatabaseFieldName(value = "u_id")
+	 * {@code @}DatabaseField(name = "u_id"){@code @}AllowPrimitiveDefaults
 	 *  private int id;
-	 * {@code @}DatabaseFieldName(value = "u_nickname", type = DataType.TEXT)
+	 * {@code @}DatabaseField(name = "u_nickname", type = DataType.TEXT)
 	 *  private String nickname;
-	 * {@code @}DatabaseFieldName(value = "u_thumbnail", type = DataType.PATH_FULL)
+	 * {@code @}DatabaseField(name = "u_thumbnail", type = DataType.PATH_FULL)
 	 *  private String thumbnail;
-	 * {@code @}DatabaseFieldName(value = "u_count_videos", type = DataType.INT4)
+	 * {@code @}DatabaseField(name = "u_count_videos", type = DataType.INT4)
 	 *  private int videoCount;
 	 * </pre> 
 	 * 
@@ -90,14 +153,23 @@ public class AnnotatedRowMapper<ITEM>
 	 * @param rs a {@link ResultSet} containing data to be extracted
 	 * @param item a source item, that has to be filled with the extracted data 
 	 * @throws SQLException thrown when data retrieving error happens
-	 * @see DatabaseFieldName
+	 * @see DatabaseField
+	 * @see AllowPrimitiveDefaults
 	 * @see DataType
 	 */
 	private static final <ItemTYPE> void extractAnnotatedFieldValues(Class<ItemTYPE> itemClass, ResultSet rs, ItemTYPE item) throws SQLException {
 		if ( itemClass == null ) throw new NullPointerException("itemClass should be not null");
 		if ( item == null ) throw new NullPointerException("item should be not null");
 		if ( rs == null ) throw new NullPointerException("rs should be not null");
-
+		
+		
+		List<MappingDescriptor> descList = mappingDescriptorCache.get(itemClass);
+		if ( descList == null ) {
+			//TODO: implement caching of the type mapping 
+			mappingDescriptorCache.put(itemClass, descList);
+		}
+		
+		
 		// we extract annotated properties from the item and set the values for them
 		Method[] itemMethods = itemClass.getDeclaredMethods();
 		for (Method setter : itemMethods) {
@@ -117,16 +189,22 @@ public class AnnotatedRowMapper<ITEM>
 				continue;
 			}
 			Class<?> fieldType = field.getType();
-			
-			DatabaseFieldName annotation = field.getAnnotation(DatabaseFieldName.class);
+
+			DatabaseField annotation = field.getAnnotation(DatabaseField.class);
+			if ( annotation == null ) continue;
+			boolean allowPrimitiveDefaults = field.isAnnotationPresent(AllowPrimitiveDefaults.class);
 			// we have a needed annotation
 			try {
 				DataType databaseFieldType = annotation.type();
-				String databaseFieldName = annotation.value();
+				String databaseFieldName = annotation.name();
+				if ( databaseFieldName.length() == 0 ) {
+					// generate name from the class field name
+					databaseFieldName = rewriteJavaPropertyNameToLowercaseUnderscoreName(fieldName);
+				}
 				if ( logger.isLoggable(Level.FINE) ) {
 					logger.fine("Property " + fieldName + " will be filled with the value of the database field [" + String.valueOf( databaseFieldName ) + "] "); 
 				}
-				Object value = databaseFieldType.extractFieldValue(rs, databaseFieldName, fieldType);
+				Object value = databaseFieldType.extractFieldValue(rs, databaseFieldName, fieldType, allowPrimitiveDefaults);
 				setter.invoke(item, value);
 			} catch (IllegalArgumentException e) {				
 				throw new IllegalArgumentException("Trying to pass value of type " + annotation.type() + " to the method " + setter.getName() + '(' + fieldType.getName() + ')');
