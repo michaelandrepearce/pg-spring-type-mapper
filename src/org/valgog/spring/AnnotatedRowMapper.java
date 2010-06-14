@@ -22,18 +22,28 @@ import org.valgog.spring.annotations.DataType;
 import org.valgog.spring.annotations.DatabaseField;
 
 /**
- * This abstract class defines a row mapper to be able to map hierarchy of fields from the AbstractResultItem subclasses.
- * <p>A constructor should be overridden that takes a needed class type as parameter so a class instance can be created.
- * <p>method {@link #fillItem(ResultSet rs, ITEM item)} should be overridden to fill the fields of the passed item object. 
- * This object is already instantiated and should not be initialized specially.
+ * This class defines a database row mapper to be able to map hierarchy of classes with properties with defined setters, 
+ * that are marked with the specific annotations. 
  * 
- * <p>For examples see {@link BasePlaylistRowMapper} and {@link ExtendedPlaylistRowMapper}
- * 
- * @see BasePlaylist.Mapper
- * @see ExtendedPlaylist.Mapper
- * @see PlaylistSearchResultItem.Mapper
+ * Here is an example of the field declarations for a class, that can be mapped using {@link AnnotatedRowMapper}:
+ * <pre>
+ * {@code @}DatabaseField(name = "u_id"){@code @}AllowPrimitiveDefaults
+ *  private int id;
+ * {@code @}DatabaseField(name = "u_nickname", type = DataType.TEXT)
+ *  private String nickname;
+ * {@code @}DatabaseField(name = "u_thumbnail", type = DataType.PATH_FULL)
+ *  private String thumbnail;
+ * {@code @}DatabaseField(name = "u_count_videos", type = DataType.INT4)
+ *  private int videoCount;
  *  
- * @author Valentine Gogichashvili
+ *  ...
+ *  // setter declarations for these fields
+ * </pre> 
+ * 
+ * @see DatabaseField
+ * @see AllowPrimitiveDefaults
+ *  
+ * @author valgog
  *
  */
 public class AnnotatedRowMapper<ITEM> 
@@ -47,6 +57,13 @@ public class AnnotatedRowMapper<ITEM>
 		this.itemType = itemType; 
 	}
 	
+	/**
+	 * Factory method to get an instance of the {@link AnnotatedRowMapper}.
+	 * <p>The class, being mapped should define no constructors or, if defines, define a public default constructor.
+	 * @param <ItemTYPE> Class type of the item to be mapped
+	 * @param itemClass Class of the item to be mapped
+	 * @return a new instance of the {@link AnnotatedRowMapper}
+	 */
 	public static final <ItemTYPE> AnnotatedRowMapper<ItemTYPE> getMapperForClass(Class<ItemTYPE> itemClass) {
 		return new AnnotatedRowMapper<ItemTYPE>(itemClass);
 	}
@@ -62,7 +79,7 @@ public class AnnotatedRowMapper<ITEM>
 	}
 	
 	/**
-	 * Should be overridden in case to fill {@code item} should be filled by non standard way.
+	 * Should be overridden in case {@code item} should be filled by non standard way.
 	 * <p>This method gets already instantiated empty {@code item} object, that should be filled.
 	 * @param rs the source ResultSet, do not use next() call on that ResultSet. Only read data.
 	 * @param item the source object that should be filled by this method. It should not be created inside the method.
@@ -75,6 +92,8 @@ public class AnnotatedRowMapper<ITEM>
 	}
 	
 	private static final String rewriteJavaPropertyNameToLowercaseUnderscoreName(String javaPropertyName) {
+		//TODO: to be tested better
+		
 		if ( javaPropertyName == null ) throw new NullPointerException();
 		final int length = javaPropertyName.length();
 		StringBuilder r = new StringBuilder( length * 2 );
@@ -110,11 +129,15 @@ public class AnnotatedRowMapper<ITEM>
 	}
 	
 	private static final ReadWriteLock mappingDescriptorCacheLock = new ReentrantReadWriteLock();
-	private static final Lock mappingDescriptorCacheReadLock = mappingDescriptorCacheLock.readLock();
-	private static final Lock mappingDescriptorCacheWriteLock = mappingDescriptorCacheLock.writeLock();
+	private static final Lock cacheReadLock = mappingDescriptorCacheLock.readLock();
+	private static final Lock cacheWriteLock = mappingDescriptorCacheLock.writeLock();
 	
 	private static final Map<Class<?>, List<MappingDescriptor>> mappingDescriptorCache = new HashMap<Class<?>, List<MappingDescriptor>>();
 	
+	/**
+	 * Private class to hold information about mapping of some database column to a class field, used in {@link mappingDescriptorCache} cache.
+	 *
+	 */
 	private static final class MappingDescriptor {
 
 		private Field classField;
@@ -154,20 +177,6 @@ public class AnnotatedRowMapper<ITEM>
 	 * This method can be used to extract the values of the annotated fields. 
 	 * Annotation should be done by the annotation {@link DatabaseField}.
 	 * 
-	 * Here is an example of the field declaration:
-	 * <pre>
-	 * {@code @}DatabaseField(name = "u_id"){@code @}AllowPrimitiveDefaults
-	 *  private int id;
-	 * {@code @}DatabaseField(name = "u_nickname", type = DataType.TEXT)
-	 *  private String nickname;
-	 * {@code @}DatabaseField(name = "u_thumbnail", type = DataType.PATH_FULL)
-	 *  private String thumbnail;
-	 * {@code @}DatabaseField(name = "u_count_videos", type = DataType.INT4)
-	 *  private int videoCount;
-	 * </pre> 
-	 * 
-	 * This method can be used in when overriding {@link #fillItem(ResultSet, Object)} method to automate it.
-	 * 
 	 * @param itemClass the Class that has to be examined for annotations
 	 * @param rs a {@link ResultSet} containing data to be extracted
 	 * @param item a source item, that has to be filled with the extracted data 
@@ -181,12 +190,14 @@ public class AnnotatedRowMapper<ITEM>
 		if ( item == null ) throw new NullPointerException("item should be not null");
 		if ( rs == null ) throw new NullPointerException("rs should be not null");
 
-		mappingDescriptorCacheReadLock.lock();
+		List<MappingDescriptor> descList;
+		// get cached structure
+		cacheReadLock.lock();
 		try {
-			List<MappingDescriptor> descList = mappingDescriptorCache.get(itemClass);
+			descList = mappingDescriptorCache.get(itemClass);
 			if ( descList == null ) {
-				mappingDescriptorCacheReadLock.unlock();
-				mappingDescriptorCacheWriteLock.lock();
+				cacheReadLock.unlock();
+				cacheWriteLock.lock();
 				try {
 					// in case some fast competitor managed to fill the cache when we did relock, check once again
 					descList = mappingDescriptorCache.get(itemClass);
@@ -197,36 +208,38 @@ public class AnnotatedRowMapper<ITEM>
 						mappingDescriptorCache.put(itemClass, descList);
 					}
 				} finally {
-					mappingDescriptorCacheReadLock.lock();
-					mappingDescriptorCacheWriteLock.unlock();
-				}
-			}
-			// use the cache
-			for( MappingDescriptor desc : descList ) {
-				final Field classField = desc.getClassField();
-				final Method classFieldSetter = desc.getClassFieldSetter();
-				final DataType dataType = desc.getDatabaseFieldType();
-				try {
-					Object value = dataType.extractFieldValue(
-							rs, 
-							desc.getDatabaseFieldName(), 
-							classField.getType(), 
-							desc.isAllowPrimitiveDefaults());
-					// we do not use classField.set() method here, to always call the setter of our class to ensure, that all the needed operations, 
-					// that could have been done in that setter are also executed
-					classFieldSetter.invoke(item, value);
-					
-				} catch (IllegalAccessException e) {
-					logger.warning(e.getMessage());
-				} catch (InvocationTargetException e) {
-					Throwable t = e.getCause();
-					if ( t instanceof SQLException ) throw (SQLException) t;
-					throw new SQLException( e.getCause().getMessage() );
+					cacheReadLock.lock();
+					cacheWriteLock.unlock();
 				}
 			}
 		} finally {
-			mappingDescriptorCacheReadLock.unlock();
+			cacheReadLock.unlock();
 		}
+		
+		// use the cache
+		for( MappingDescriptor desc : descList ) {
+			final Field classField = desc.getClassField();
+			final Method classFieldSetter = desc.getClassFieldSetter();
+			final DataType dataType = desc.getDatabaseFieldType();
+			try {
+				Object value = dataType.extractFieldValue(
+						rs, 
+						desc.getDatabaseFieldName(), 
+						classField.getType(), 
+						desc.isAllowPrimitiveDefaults());
+				// we do not use classField.set() method here, to always call the setter of our class to ensure, that all the needed operations, 
+				// that could have been done in that setter are also executed
+				classFieldSetter.invoke(item, value);
+				
+			} catch (IllegalAccessException e) {
+				logger.warning(e.getMessage());
+			} catch (InvocationTargetException e) {
+				Throwable t = e.getCause();
+				if ( t instanceof SQLException ) throw (SQLException) t;
+				throw new SQLException( e.getCause().getMessage() );
+			}
+		}
+
 	}
 
 	private static <ItemTYPE> void extractMappingDescriptorsForClass(Class<ItemTYPE> itemClass, List<MappingDescriptor> descList) {
