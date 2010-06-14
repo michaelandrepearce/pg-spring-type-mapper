@@ -85,7 +85,7 @@ public class MappingTest {
 			assertThat("Muster", is(result.getName()));
 			assertThat("DE", is(result.getCountryCode()));
 			assertThat(new int[] {1, 1, 3, 1, 5}, is(result.getLastMarks()));
-			assertThat(new String[] {"a","b","c",null,"d"}, is(result.getTags()));
+			assertThat(new String[] {"a","b","c",null,"e"}, is(result.getTags()));
 		}
 
 	}	
@@ -93,7 +93,7 @@ public class MappingTest {
 	@Test(expected=SQLException.class)
 	public void testPrimitiveMapRow() throws SQLException {
 		
-		PreparedStatement ps = conn.prepareStatement("SELECT 1 as id, 'Muster' as name, 'DE' as country_code, '{1,1,3,1, NULL}'::int4[] as last_marks, '{a,b,c}'::text[] as tags");
+		PreparedStatement ps = conn.prepareStatement("SELECT NULL as id, 'Muster' as name, 'DE' as country_code, '{1,1,3,1, NULL}'::int4[] as last_marks, '{a,b,c}'::text[] as tags");
 		ResultSet rs = ps.executeQuery();
 		AnnotatedRowMapper<SimpleClass> mapper = AnnotatedRowMapper.getMapperForClass(SimpleClass.class);
 		int i = 0;
