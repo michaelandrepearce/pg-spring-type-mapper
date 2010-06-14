@@ -27,14 +27,12 @@ import org.valgog.spring.annotations.DatabaseField;
  * 
  * Here is an example of the field declarations for a class, that can be mapped using {@link AnnotatedRowMapper}:
  * <pre>
- * {@code @}DatabaseField(name = "u_id"){@code @}AllowPrimitiveDefaults
+ * {@code @}DatabaseField(name = "id"){@code @}AllowPrimitiveDefaults
  *  private int id;
- * {@code @}DatabaseField(name = "u_nickname", type = DataType.TEXT)
- *  private String nickname;
- * {@code @}DatabaseField(name = "u_thumbnail", type = DataType.PATH_FULL)
- *  private String thumbnail;
- * {@code @}DatabaseField(name = "u_count_videos", type = DataType.INT4)
- *  private int videoCount;
+ * {@code @}DatabaseField(name = "login_name", type = DataType.TEXT)
+ *  private String loginName;
+ * {@code @}DatabaseField(name = "words")
+ *  private String[] words;
  *  
  *  ...
  *  // setter declarations for these fields
