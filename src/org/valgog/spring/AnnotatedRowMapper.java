@@ -20,6 +20,7 @@ import org.springframework.jdbc.core.simple.ParameterizedRowMapper;
 import org.valgog.spring.annotations.AllowPrimitiveDefaults;
 import org.valgog.spring.annotations.DataType;
 import org.valgog.spring.annotations.DatabaseField;
+import org.valgog.spring.annotations.DatabaseFieldNamePrefix;
 
 /**
  * This class defines a database row mapper to be able to map hierarchy of classes with properties with defined setters, 
@@ -240,7 +241,26 @@ public class AnnotatedRowMapper<ITEM>
 
 	}
 
+	/**
+	 * This method retrospects the given {@code itemClass} and creates a list of {@link MappingDesriptor} objects, that define field mappings
+	 * @param <ItemTYPE>
+	 * @param itemClass
+	 * @param descList
+	 */
 	private static <ItemTYPE> void extractMappingDescriptorsForClass(Class<ItemTYPE> itemClass, List<MappingDescriptor> descList) {
+		
+		if ( itemClass == null || Object.class.equals(itemClass) ) { 
+			return;
+		}
+		
+		// fill mapping descriptors for class super classes
+		Class<? super ItemTYPE> itemSuperClass = itemClass.getSuperclass();
+		extractMappingDescriptorsForClass(itemSuperClass, descList);
+		
+		// get global field name prefix if defined
+		DatabaseFieldNamePrefix fieldNamePrefixAnnotation = itemClass.getAnnotation(DatabaseFieldNamePrefix.class);
+		String globalPrefix = fieldNamePrefixAnnotation == null ? null : fieldNamePrefixAnnotation.value();
+		
 		Method[] itemMethods = itemClass.getDeclaredMethods();
 		for (Method setter : itemMethods) {
 			if ( setter.isSynthetic() ) continue;
@@ -265,9 +285,21 @@ public class AnnotatedRowMapper<ITEM>
 			
 			DataType databaseFieldType = annotation.type();
 			String databaseFieldName = annotation.name();
-			if ( databaseFieldName.length() == 0 ) {
+			if ( databaseFieldName == null || databaseFieldName.length() == 0 ) {
 				// generate name from the class field name
 				databaseFieldName = rewriteJavaPropertyNameToLowercaseUnderscoreName(fieldName);
+				DatabaseFieldNamePrefix prefixAnnotation = field.getAnnotation(DatabaseFieldNamePrefix.class);
+				if ( prefixAnnotation != null ) {
+					String prefix = prefixAnnotation.value();
+					if ( prefix != null && prefix.length() > 0 ) {
+						databaseFieldName = prefix + databaseFieldName;
+					}				
+				} else {
+					// prefix annotation is not defined for that field, check if the global prefix annotation is defined
+					if ( globalPrefix != null && globalPrefix.length() > 0 ) {
+						databaseFieldName = globalPrefix + databaseFieldName;
+					}
+				}
 			}
 			MappingDescriptor desc = new MappingDescriptor(
 					field, 

@@ -8,7 +8,8 @@ import java.lang.annotation.Target;
 
 
 /**
- * This annotation can be used to allow prefixing all automatically generated field names of the class by the {@link AnnotatedRowMapper}
+ * This annotation can be used by the {@link AnnotatedRowMapper} to allow prefixing all automatically generated field names of the annotated class 
+ * or fields annotated with this annotation (when the name is not defined by the {@link DatabaseField) annotation.
  * @author valgog
  *
  */
@@ -16,5 +17,5 @@ import java.lang.annotation.Target;
 @Retention(RetentionPolicy.RUNTIME)
 @Target({ElementType.TYPE, ElementType.FIELD}) 
 public @interface DatabaseFieldNamePrefix {
-	String value();
+	String value() default "";
 }

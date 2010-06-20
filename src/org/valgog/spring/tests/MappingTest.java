@@ -17,7 +17,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.valgog.spring.AnnotatedRowMapper;
 import org.valgog.spring.tests.example.SimpleClass;
-
+import org.valgog.spring.tests.example.ExtendedClass;
 
 public class MappingTest {
 
@@ -58,7 +58,7 @@ public class MappingTest {
 	
 	
 	@Test
-	public final void testMapRow() throws SQLException {
+	public final void testMapSimpleRow() throws SQLException {
 		
 		PreparedStatement ps = conn.prepareStatement("SELECT * FROM test.simple;");
 		ResultSet rs = ps.executeQuery();
@@ -67,9 +67,25 @@ public class MappingTest {
 		while( rs.next() ) {
 			SimpleClass result = mapper.mapRow(rs, i++);
 			assertNotNull(result);
+			assertEquals(i, result.getId());
+			assertThat(new String[] {"a","b","c","d"}, is(result.getTags()));
 		}
 	}
 
+	@Test
+	public final void testMapExtendedRow() throws SQLException {
+		
+		PreparedStatement ps = conn.prepareStatement("SELECT *, name || ' as full name' as e_full_name FROM test.simple;");
+		ResultSet rs = ps.executeQuery();
+		AnnotatedRowMapper<ExtendedClass> mapper = AnnotatedRowMapper.getMapperForClass(ExtendedClass.class);
+		int i = 0;
+		while( rs.next() ) {
+			ExtendedClass result = mapper.mapRow(rs, i++);
+			assertNotNull(result);
+			assertThat("name" + Integer.toString(i) + " as full name", is(result.getFullName()));
+		}
+	}
+	
 	
 	@Test()
 	public void testSingleMapRow() throws SQLException {
