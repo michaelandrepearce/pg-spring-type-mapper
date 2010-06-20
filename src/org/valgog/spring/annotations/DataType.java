@@ -34,6 +34,18 @@ public enum DataType {
 			return value;
 		}
 	},
+
+	/**
+	 * This type can be used for short repeating texts so that the extracted Strings are pointing to the same cached Object 
+	 * as defined in {@link String#intern()}.
+	 */
+	COMMON_TEXT {
+		@Override
+		public Object extractFieldValueRaw(ResultSet rs, String fieldName) throws SQLException {
+			String s = rs.getString( fieldName );
+			return ( s == null ) ? null : s.intern();
+		}
+	},
 	
 	/*
 	 * Predefined data types with known conversion functions 
@@ -69,13 +81,6 @@ public enum DataType {
 		}
 	},
 	
-	COMMON_TEXT {
-		@Override
-		public Object extractFieldValueRaw(ResultSet rs, String fieldName) throws SQLException {
-			String s = rs.getString( fieldName );
-			return ( s == null ) ? null : s.intern();
-		}
-	},
 	REAL {
 		@Override
 		public Object extractFieldValueRaw(ResultSet rs, String fieldName) throws SQLException {
@@ -244,8 +249,10 @@ public enum DataType {
 					java.lang.reflect.Array.set(newArray, i, makeAssignable(expectedType.getComponentType(), element, allowPrimitiveDefaults) );
 				} catch (IllegalArgumentException e) {
 					// we have a NULL value, that is being assigned to the primitive array element. That is not possible
-					// skipping this assignment will leave an element with a default value
-					// actually, this should not happen now, as the value will be either substituted by the default value before or an exception will be already thrown
+					// skipping this assignment will leave an element with a default value.
+					
+					// actually, this should not happen now, as the value will be either substituted by the default value before 
+					// or an exception will be already thrown
 				}
 			}
 			return (T) newArray;
@@ -258,7 +265,7 @@ public enum DataType {
 		} catch (Exception ignore) {
 			// Ok, the trick with the constructor did not work out, try the last String trick
 			if ( expectedType.isAssignableFrom(CharSequence.class) ) {
-				// expected type is a String compatible, in this case we just convert our value into the string and pass it so
+				// expected type is String compatible, in this case we just convert our value into the string and pass it so
 				return (T) value.toString();
 			} 
 		} 
