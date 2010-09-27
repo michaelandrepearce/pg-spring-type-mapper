@@ -1,16 +1,20 @@
 package org.valgog.spring.annotations;
 
 import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
 import java.sql.Array;
+import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import javax.swing.text.html.HTMLDocument.HTMLReader.IsindexAction;
+import org.postgresql.PGConnection;
+import org.postgresql.util.PGobject;
+import org.valgog.utils.PostgresUtils;
+import org.valgog.utils.RowParserException;
 
 /**
  * This enumeration is used in the {@link DatabaseField} annotation 
@@ -137,13 +141,12 @@ public enum DataType {
 
 	
 	public <T> T extractFieldValue(ResultSet rs, String fieldName, Class<T> fieldType) throws SQLException {
-		Object value = extractFieldValueRaw(rs, fieldName);
-		return makeAssignable(fieldType, value, false);
+		return extractFieldValue(rs, fieldName, fieldType, false);
 	}
 	
 	public <T> T extractFieldValue(ResultSet rs, String fieldName, Class<T> fieldType, boolean allowPrimitiveDefaults) throws SQLException {
 		Object value = extractFieldValueRaw(rs, fieldName);
-		return makeAssignable(fieldType, value, allowPrimitiveDefaults);
+		return makeAssignable(rs.getStatement().getConnection(), fieldType, value, allowPrimitiveDefaults);
 	}
 	
 	/*
@@ -200,8 +203,17 @@ public enum DataType {
 		
 	};
 	
+	/**
+	 * Make the given value assignable to the expected class type
+	 * @param <T> expected class type
+	 * @param expectedType expected class type
+	 * @param value value to be converted
+	 * @param allowPrimitiveDefaults if true, use default primitive values instead of null values
+	 * @return assignable value of type <code>expectedType</code>
+	 * @throws SQLException
+	 */
 	@SuppressWarnings("unchecked")
-	private static final <T> T makeAssignable(Class<T> expectedType, Object value, boolean allowPrimitiveDefaults) throws SQLException {
+	private static final <T> T makeAssignable(Connection connection, Class<T> expectedType, Object value, boolean allowPrimitiveDefaults) throws SQLException {
 		if ( value == null ) { 
 			if ( expectedType.isPrimitive() ) {
 				// primitive types cannot be null, we have to rewrite the value to it's default?
@@ -230,23 +242,28 @@ public enum DataType {
 			} else if ( value instanceof Character ) {
 				if ( expectedType == Character.TYPE ) return (T) value;
 			} else if ( value instanceof CharSequence ) {
-				// in case if we not a String and we expect a char, we transfer a first character only
-				CharSequence cs = (CharSequence) value;
-				Object c = cs.charAt(0);
-				if ( cs.length() > 0 ) return (T) c;
+				if ( expectedType == Character.TYPE ) {
+					// in case if we get a String and we expect a char, we transfer a first character only
+					CharSequence cs = (CharSequence) value;
+					if ( cs.length() > 0 ) {
+						Object c = cs.charAt(0);
+						return (T) c;
+					}
+				}
 			}
 		}
 				
 		// object is not compatible with the fieldType, will try to do something about that
-		// check if we expecting an array
+		// check if we are expecting an array
 		if ( expectedType.isArray() && value.getClass().isArray() ) {
 			// we expect an array type here, we have to rewrite the array in case an
-			Object[] originalArray = (Object[]) value;
-			Object newArray = java.lang.reflect.Array.newInstance(expectedType.getComponentType(), originalArray.length );
+			final Object[] originalArray = (Object[]) value;
+			final Class<?> arrayComponentType = expectedType.getComponentType();
+			Object newArray = java.lang.reflect.Array.newInstance(arrayComponentType, originalArray.length );
 			for (int i = 0; i < originalArray.length; i++) {
-				Object element = originalArray[i];
+				final Object element = originalArray[i];
 				try {
-					java.lang.reflect.Array.set(newArray, i, makeAssignable(expectedType.getComponentType(), element, allowPrimitiveDefaults) );
+					java.lang.reflect.Array.set(newArray, i, makeAssignable(connection, arrayComponentType, element, allowPrimitiveDefaults) );
 				} catch (IllegalArgumentException e) {
 					// we have a NULL value, that is being assigned to the primitive array element. That is not possible
 					// skipping this assignment will leave an element with a default value.
@@ -257,7 +274,18 @@ public enum DataType {
 			}
 			return (T) newArray;
 		}
-					
+		
+		// try to map PGObject
+		if ( value instanceof PGobject ) {
+			String objectValue = ((PGobject)value).getValue();
+			try {
+				List<String> elementList = PostgresUtils.postgresROW2StringList(objectValue, 128);
+				System.out.println(elementList);
+			} catch (RowParserException e) {
+				e.printStackTrace();
+			}
+		}
+		
 		// now try to find a constructor, that will accept the given value (for example Integer(int) )
 		try {
 			Constructor<T> expectedTypeConstructor = expectedType.getDeclaredConstructor(value.getClass());

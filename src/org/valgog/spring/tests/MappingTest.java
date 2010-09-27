@@ -18,6 +18,7 @@ import org.junit.Test;
 import org.valgog.spring.AnnotatedRowMapper;
 import org.valgog.spring.tests.example.SimpleClass;
 import org.valgog.spring.tests.example.ExtendedClass;
+import org.valgog.spring.tests.example.SimpleRowClass;
 
 public class MappingTest {
 
@@ -50,8 +51,13 @@ public class MappingTest {
 			"); \n" +
 			"insert into test.simple \n" +
 			"select s.i, 'name' || s.i, 'DE', ARRAY[ (random()*100)::integer,(random()*100)::integer,(random()*100)::integer,(random()*100)::integer ], '{a,b,c,d}'::text[] \n" +
-			"from generate_series(1, 100) as s(i);";
-		
+			"from generate_series(1, 100) as s(i);" +
+			"CREATE TYPE test.simple_type AS ( \n" +
+			"  id integer, \n" +
+			"  name text, \n" +
+			"  country_code text, \n" +
+			"  last_marks int[] \n" +
+			"); \n" ;
 		s.execute(SQL);
 		conn.commit();
 	}
@@ -119,6 +125,20 @@ public class MappingTest {
 		}
 
 	}	
-	
+
+	@Test()
+	public void testRowMapRow() throws SQLException {
+		
+		PreparedStatement ps = conn.prepareStatement("SELECT ROW(1,'a','b',NULL)::test.simple_type as st");
+		ResultSet rs = ps.executeQuery();
+		AnnotatedRowMapper<SimpleRowClass> mapper = AnnotatedRowMapper.getMapperForClass(SimpleRowClass.class);
+		int i = 0;
+		while( rs.next() ) {
+			SimpleRowClass row = mapper.mapRow(rs, i++);
+			assertNotNull(row);
+		}
+
+	}	
+
 
 }

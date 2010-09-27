@@ -7,9 +7,11 @@ import java.lang.reflect.Modifier;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -21,6 +23,7 @@ import org.valgog.spring.annotations.AllowPrimitiveDefaults;
 import org.valgog.spring.annotations.DataType;
 import org.valgog.spring.annotations.DatabaseField;
 import org.valgog.spring.annotations.DatabaseFieldNamePrefix;
+import org.valgog.spring.annotations.Optional;
 
 /**
  * This class defines a database row mapper to be able to map hierarchy of classes with properties with defined setters, 
@@ -90,6 +93,7 @@ public class AnnotatedRowMapper<ITEM>
 		extractAnnotatedFieldValues(this.itemType, rs, item);
 	}
 	
+	
 	private static final String rewriteJavaPropertyNameToLowercaseUnderscoreName(String javaPropertyName) {
 		//TODO: to be tested better
 		
@@ -139,19 +143,20 @@ public class AnnotatedRowMapper<ITEM>
 	 */
 	private static final class MappingDescriptor {
 
-		private Field classField;
-
-		private Method classFieldSetter;
-		private DataType databaseFieldType;
-		private String databaseFieldName;
-		private boolean allowPrimitiveDefaults;
+		final private Field classField;
+		final private Method classFieldSetter;
+		final private DataType databaseFieldType;
+		final private String databaseFieldName;
+		final private int databaseFieldIndex;
+		final private EnumSet<MappingOption> options;
 		
-		public MappingDescriptor(Field classField, Method classFieldSetter, DataType databaseFieldType, String databaseFieldName, boolean allowPrimitiveDefaults) {
+		public MappingDescriptor(Field classField, Method classFieldSetter, DataType databaseFieldType, String databaseFieldName, int databaseFieldIndex, Set<MappingOption> options) {
 			this.classField = classField;
 			this.classFieldSetter = classFieldSetter;
 			this.databaseFieldType = databaseFieldType;
 			this.databaseFieldName = databaseFieldName;
-			this.allowPrimitiveDefaults = allowPrimitiveDefaults;
+			this.databaseFieldIndex = databaseFieldIndex;
+			this.options = EnumSet.copyOf(options);
 		}
 		
 		public Field getClassField() {
@@ -166,12 +171,19 @@ public class AnnotatedRowMapper<ITEM>
 		public String getDatabaseFieldName() {
 			return databaseFieldName;
 		}
-		public boolean isAllowPrimitiveDefaults() {
-			return allowPrimitiveDefaults;
+		public int getDatabaseFieldIndex() {
+			return databaseFieldIndex;
+		}
+		public boolean is(MappingOption option) {
+			return options.contains(option);
 		}
 		
 	}
 	
+	private static enum MappingOption {
+		OPTIONAL, ALLOW_PRIMITIVE_DEFAULTS;
+	}
+
 	/**
 	 * This method can be used to extract the values of the annotated fields. 
 	 * Annotation should be done by the annotation {@link DatabaseField}.
@@ -184,16 +196,44 @@ public class AnnotatedRowMapper<ITEM>
 	 * @see AllowPrimitiveDefaults
 	 * @see DataType
 	 */
-	private static final <ItemTYPE> void extractAnnotatedFieldValues(Class<ItemTYPE> itemClass, ResultSet rs, ItemTYPE item) throws SQLException {
+	static final <ItemTYPE> void extractAnnotatedFieldValues(Class<ItemTYPE> itemClass, ResultSet rs, ItemTYPE item) throws SQLException {
 		if ( itemClass == null ) throw new NullPointerException("itemClass should be not null");
 		if ( item == null ) throw new NullPointerException("item should be not null");
 		if ( rs == null ) throw new NullPointerException("rs should be not null");
 
-		List<MappingDescriptor> descList;
 		// get cached structure
+		List<MappingDescriptor> descList = getFieldDescriptorCache(itemClass);
+		
+		// use the cache
+		for( MappingDescriptor desc : descList ) {
+			final Field classField = desc.getClassField();
+			final Method classFieldSetter = desc.getClassFieldSetter();
+			final DataType dataType = desc.getDatabaseFieldType();
+			try {
+				Object value = dataType.extractFieldValue(
+						rs, 
+						desc.getDatabaseFieldName(), 
+						classField.getType(), 
+						desc.is(MappingOption.ALLOW_PRIMITIVE_DEFAULTS));
+				// we do not use classField.set() method here, to always call the setter of our class to ensure, that all the needed operations, 
+				// that could have been done in that setter are also executed
+				classFieldSetter.invoke(item, value);
+				
+			} catch (IllegalAccessException e) {
+				logger.warning(e.getMessage());
+			} catch (InvocationTargetException e) {
+				Throwable t = e.getCause();
+				if ( t instanceof SQLException ) throw (SQLException) t;
+				throw new SQLException( e.getCause().getMessage() );
+			}
+		}
+
+	}
+
+	static final <ItemTYPE> List<MappingDescriptor> getFieldDescriptorCache(Class<ItemTYPE> itemClass) {
 		cacheReadLock.lock();
 		try {
-			descList = mappingDescriptorCache.get(itemClass);
+			List<MappingDescriptor> descList = mappingDescriptorCache.get(itemClass);
 			if ( descList == null ) {
 				cacheReadLock.unlock();
 				cacheWriteLock.lock();
@@ -211,77 +251,59 @@ public class AnnotatedRowMapper<ITEM>
 					cacheWriteLock.unlock();
 				}
 			}
+			return descList;
 		} finally {
 			cacheReadLock.unlock();
 		}
-		
-		// use the cache
-		for( MappingDescriptor desc : descList ) {
-			final Field classField = desc.getClassField();
-			final Method classFieldSetter = desc.getClassFieldSetter();
-			final DataType dataType = desc.getDatabaseFieldType();
-			try {
-				Object value = dataType.extractFieldValue(
-						rs, 
-						desc.getDatabaseFieldName(), 
-						classField.getType(), 
-						desc.isAllowPrimitiveDefaults());
-				// we do not use classField.set() method here, to always call the setter of our class to ensure, that all the needed operations, 
-				// that could have been done in that setter are also executed
-				classFieldSetter.invoke(item, value);
-				
-			} catch (IllegalAccessException e) {
-				logger.warning(e.getMessage());
-			} catch (InvocationTargetException e) {
-				Throwable t = e.getCause();
-				if ( t instanceof SQLException ) throw (SQLException) t;
-				throw new SQLException( e.getCause().getMessage() );
-			}
-		}
-
 	}
 
 	/**
-	 * This method retrospects the given {@code itemClass} and creates a list of {@link MappingDesriptor} objects, that define field mappings
-	 * @param <ItemTYPE>
-	 * @param itemClass
-	 * @param descList
+	 * This method retrospects given {@code itemClass} and fills a list of {@link MappingDesriptor} objects, that define field mappings
+	 * @param <ItemTYPE> source item class type
+	 * @param itemClass source item class
+	 * @param descList List of {@link MappingDesriptor} objects to filled with field mappings
 	 */
-	private static <ItemTYPE> void extractMappingDescriptorsForClass(Class<ItemTYPE> itemClass, List<MappingDescriptor> descList) {
+	static final <ItemTYPE> int extractMappingDescriptorsForClass(Class<ItemTYPE> itemClass, List<MappingDescriptor> descList) {
 		
 		if ( itemClass == null || Object.class.equals(itemClass) ) { 
-			return;
+			return 0;
 		}
 		
 		// fill mapping descriptors for class super classes
 		Class<? super ItemTYPE> itemSuperClass = itemClass.getSuperclass();
-		extractMappingDescriptorsForClass(itemSuperClass, descList);
+		final int superClassDatabaseFieldCount = extractMappingDescriptorsForClass(itemSuperClass, descList);
 		
 		// get global field name prefix if defined
 		DatabaseFieldNamePrefix fieldNamePrefixAnnotation = itemClass.getAnnotation(DatabaseFieldNamePrefix.class);
 		String globalPrefix = fieldNamePrefixAnnotation == null ? null : fieldNamePrefixAnnotation.value();
-		
-		Method[] itemMethods = itemClass.getDeclaredMethods();
-		for (Method setter : itemMethods) {
-			if ( setter.isSynthetic() ) continue;
-			// if ( ! setter.isAccessible() ) continue;
-			if ( Modifier.isStatic(setter.getModifiers()) ) continue;
-			String methodName = setter.getName();
-			if ( ! methodName.startsWith("set") ) continue;
-			if ( methodName.length() <= 3 ) continue;
-			String fieldName = java.beans.Introspector.decapitalize( methodName.substring(3) );
-			Field field;
+		int databaseFieldIndex = 0;
+		Field[] itemFields = itemClass.getDeclaredFields();
+		for (int i = 0 ; i < itemFields.length ; i++ ) {
+			databaseFieldIndex = superClassDatabaseFieldCount + 1 + i;
+			final Field field = itemFields[i];
+			final String fieldName = field.getName();
+			if ( field.isSynthetic() ) continue;
+			// find the setter 
+			Method setter;
 			try {
-				field = itemClass.getDeclaredField(fieldName);
-			} catch (SecurityException e) {
+				final String setterName = "set" + capitalize( fieldName );
+				setter = itemClass.getDeclaredMethod(setterName, field.getType() );
+			} catch (SecurityException securityException) {
+				// skip this filed completely
+				logger.warning("Skipping field " + fieldName + " for class " + itemClass.getName() + " as the setter could not be extracted: " + securityException.getMessage() );
 				continue;
-			} catch (NoSuchFieldException e) {
-				continue;
+			} catch (NoSuchMethodException e) {
+				setter = null;
 			}
-
+			EnumSet<MappingOption> mappingOptions = EnumSet.noneOf(MappingOption.class);
 			DatabaseField annotation = field.getAnnotation(DatabaseField.class);
 			if ( annotation == null ) continue;
-			boolean allowPrimitiveDefaults = field.isAnnotationPresent(AllowPrimitiveDefaults.class);
+			if ( field.isAnnotationPresent(AllowPrimitiveDefaults.class) ) {
+				mappingOptions.add(MappingOption.ALLOW_PRIMITIVE_DEFAULTS);
+			}
+			if ( field.isAnnotationPresent(Optional.class) ) {
+				mappingOptions.add(MappingOption.OPTIONAL);
+			}
 			
 			DataType databaseFieldType = annotation.type();
 			String databaseFieldName = annotation.name();
@@ -293,7 +315,7 @@ public class AnnotatedRowMapper<ITEM>
 					String prefix = prefixAnnotation.value();
 					if ( prefix != null && prefix.length() > 0 ) {
 						databaseFieldName = prefix + databaseFieldName;
-					}				
+					}
 				} else {
 					// prefix annotation is not defined for that field, check if the global prefix annotation is defined
 					if ( globalPrefix != null && globalPrefix.length() > 0 ) {
@@ -306,12 +328,27 @@ public class AnnotatedRowMapper<ITEM>
 					setter,
 					databaseFieldType, 
 					databaseFieldName, 
-					allowPrimitiveDefaults);							
+					databaseFieldIndex,
+					mappingOptions);
 			if ( logger.isLoggable(Level.FINE) ) {
 				logger.fine("Property " + fieldName + " will be filled with the value of the database field [" + String.valueOf( databaseFieldName ) + "] "); 
 			}
 			descList.add(desc);
 		}
+		return databaseFieldIndex;
+	}
+	
+	private static final String capitalize(String name) {
+		if (name == null || name.length() == 0) {
+			return name;
+		}
+		if (name.length() > 1 && Character.isUpperCase(name.charAt(0))){
+			return name;
+		}
+		char chars[] = name.toCharArray();
+		chars[0] = Character.toUpperCase(chars[0]);
+		return new String(chars);
+		
 	}
 	
 	public final ITEM mapRow(ResultSet rs, int rowNum) throws SQLException {
