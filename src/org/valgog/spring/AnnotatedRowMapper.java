@@ -1,9 +1,11 @@
 package org.valgog.spring;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -18,12 +20,15 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import org.postgresql.util.PGobject;
 import org.springframework.jdbc.core.simple.ParameterizedRowMapper;
 import org.valgog.spring.annotations.AllowPrimitiveDefaults;
 import org.valgog.spring.annotations.DataType;
 import org.valgog.spring.annotations.DatabaseField;
 import org.valgog.spring.annotations.DatabaseFieldNamePrefix;
 import org.valgog.spring.annotations.Optional;
+import org.valgog.utils.PostgresUtils;
+import org.valgog.utils.RowParserException;
 
 /**
  * This class defines a database row mapper to be able to map hierarchy of classes with properties with defined setters, 
@@ -202,22 +207,37 @@ public class AnnotatedRowMapper<ITEM>
 		if ( rs == null ) throw new NullPointerException("rs should be not null");
 
 		// get cached structure
-		List<MappingDescriptor> descList = getFieldDescriptorCache(itemClass);
-		
+		final List<MappingDescriptor> descList = getCachedFieldMappingDescriptorList(itemClass);
+		final Connection connection = rs.getStatement().getConnection();
 		// use the cache
 		for( MappingDescriptor desc : descList ) {
 			final Field classField = desc.getClassField();
+			final Class<?> expectedType = classField.getClass();
 			final Method classFieldSetter = desc.getClassFieldSetter();
 			final DataType dataType = desc.getDatabaseFieldType();
+			final String fieldName = desc.getDatabaseFieldName();
 			try {
-				Object value = dataType.extractFieldValue(
-						rs, 
-						desc.getDatabaseFieldName(), 
-						classField.getType(), 
-						desc.is(MappingOption.ALLOW_PRIMITIVE_DEFAULTS));
-				// we do not use classField.set() method here, to always call the setter of our class to ensure, that all the needed operations, 
-				// that could have been done in that setter are also executed
-				classFieldSetter.invoke(item, value);
+				int fieldIndex = -1;
+				try {
+					fieldIndex = rs.findColumn(fieldName);
+				} catch( SQLException e) {
+					if ( desc.is(MappingOption.OPTIONAL) ) {
+						continue; // skip the optional field if not found in the result set
+					} else {
+						throw e;
+					}
+				}
+				
+				Object rawValue = dataType.extractFieldValueRaw(rs, fieldIndex);
+				
+				Object value = makeAssignable(connection, expectedType, rawValue, desc.is(MappingOption.ALLOW_PRIMITIVE_DEFAULTS));
+				
+				if ( classFieldSetter != null ) {
+					classFieldSetter.invoke(item, value);
+				} else {
+					classField.set(item, value);
+				}
+				
 				
 			} catch (IllegalAccessException e) {
 				logger.warning(e.getMessage());
@@ -230,7 +250,7 @@ public class AnnotatedRowMapper<ITEM>
 
 	}
 
-	static final <ItemTYPE> List<MappingDescriptor> getFieldDescriptorCache(Class<ItemTYPE> itemClass) {
+	static final private <ItemTYPE> List<MappingDescriptor> getCachedFieldMappingDescriptorList(Class<ItemTYPE> itemClass) {
 		cacheReadLock.lock();
 		try {
 			List<MappingDescriptor> descList = mappingDescriptorCache.get(itemClass);
@@ -263,7 +283,7 @@ public class AnnotatedRowMapper<ITEM>
 	 * @param itemClass source item class
 	 * @param descList List of {@link MappingDesriptor} objects to filled with field mappings
 	 */
-	static final <ItemTYPE> int extractMappingDescriptorsForClass(Class<ItemTYPE> itemClass, List<MappingDescriptor> descList) {
+	static final private <ItemTYPE> int extractMappingDescriptorsForClass(Class<ItemTYPE> itemClass, List<MappingDescriptor> descList) {
 		
 		if ( itemClass == null || Object.class.equals(itemClass) ) { 
 			return 0;
@@ -350,6 +370,104 @@ public class AnnotatedRowMapper<ITEM>
 		return new String(chars);
 		
 	}
+	
+	/**
+	 * Make the given value assignable to the expected class type
+	 * @param <T> expected class type
+	 * @param expectedType expected class type
+	 * @param value value to be converted
+	 * @param allowPrimitiveDefaults if true, use default primitive values instead of null values
+	 * @return assignable value of type <code>expectedType</code>
+	 * @throws SQLException
+	 */
+	@SuppressWarnings("unchecked")
+	private static final <T> T makeAssignable(Connection connection, Class<T> expectedType, Object value, boolean allowPrimitiveDefaults) throws SQLException {
+		if ( value == null ) { 
+			if ( expectedType.isPrimitive() ) {
+				// primitive types cannot be null, we have to rewrite the value to it's default?
+				if ( allowPrimitiveDefaults ) {
+					if ( logger.isLoggable(Level.FINE) ) logger.fine("Primitive type " + expectedType.getName() + " expected, rewriting NULL to primitive type default");
+					return (T) DataType.primitiveDefaults.get(expectedType);
+				} else {
+					throw new SQLException("NULL value is not possible when filling a primitive type " + expectedType.getName() + ", if NULL values are needed, try to use not primitive wrapper classes as field types" );
+				}
+			} else {
+				return null;
+			}
+		}
+		
+		if ( expectedType.isInstance(value) ) {
+			// in normal case we should always get here (so the call to that method should not be very expensive)
+			return (T) value;
+		}
+
+		if ( expectedType.isPrimitive() ) {
+			// TODO: This part should be tested better
+			if ( value instanceof Number ) {
+				return (T) value;
+			} else if ( value instanceof Boolean ) {
+				if ( expectedType == Boolean.TYPE ) return (T) value;
+			} else if ( value instanceof Character ) {
+				if ( expectedType == Character.TYPE ) return (T) value;
+			} else if ( value instanceof CharSequence ) {
+				if ( expectedType == Character.TYPE ) {
+					// in case if we get a String and we expect a char, we transfer a first character only
+					CharSequence cs = (CharSequence) value;
+					if ( cs.length() > 0 ) {
+						Object c = cs.charAt(0);
+						return (T) c;
+					}
+				}
+			}
+		}
+				
+		// object is not compatible with the fieldType, will try to do something about that
+		// check if we are expecting an array
+		if ( expectedType.isArray() && value.getClass().isArray() ) {
+			// we expect an array type here, we have to rewrite the array in case an
+			final Object[] originalArray = (Object[]) value;
+			final Class<?> arrayComponentType = expectedType.getComponentType();
+			Object newArray = java.lang.reflect.Array.newInstance(arrayComponentType, originalArray.length );
+			for (int i = 0; i < originalArray.length; i++) {
+				final Object element = originalArray[i];
+				try {
+					java.lang.reflect.Array.set(newArray, i, makeAssignable(connection, arrayComponentType, element, allowPrimitiveDefaults) );
+				} catch (IllegalArgumentException e) {
+					// we have a NULL value, that is being assigned to the primitive array element. That is not possible
+					// skipping this assignment will leave an element with a default value.
+					
+					// actually, this should not happen now, as the value will be either substituted by the default value before 
+					// or an exception will be already thrown
+				}
+			}
+			return (T) newArray;
+		}
+		
+		// try to map PGObject
+		if ( value instanceof PGobject ) {
+			String objectValue = ((PGobject)value).getValue();
+			try {
+				List<String> elementList = PostgresUtils.postgresROW2StringList(objectValue, 128);
+				System.out.println(elementList);
+			} catch (RowParserException e) {
+				e.printStackTrace();
+			}
+		}
+		
+		// now try to find a constructor, that will accept the given value (for example Integer(int) )
+		try {
+			Constructor<T> expectedTypeConstructor = expectedType.getDeclaredConstructor(value.getClass());
+			return expectedTypeConstructor.newInstance(value);
+		} catch (Exception ignore) {
+			// Ok, the trick with the constructor did not work out, try the last String trick
+			if ( expectedType.isAssignableFrom(CharSequence.class) ) {
+				// expected type is String compatible, in this case we just convert our value into the string and pass it so
+				return (T) value.toString();
+			} 
+		} 
+		
+		throw new SQLException("Can not map recieved object of type " + value.getClass().getCanonicalName() + " to expected type " + expectedType.getCanonicalName() );
+	}	
 	
 	public final ITEM mapRow(ResultSet rs, int rowNum) throws SQLException {
 		ITEM item = newItemInstance();

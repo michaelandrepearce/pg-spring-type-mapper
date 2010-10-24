@@ -1,20 +1,11 @@
 package org.valgog.spring.annotations;
 
-import java.lang.reflect.Constructor;
 import java.sql.Array;
-import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-
-import org.postgresql.PGConnection;
-import org.postgresql.util.PGobject;
-import org.valgog.utils.PostgresUtils;
-import org.valgog.utils.RowParserException;
 
 /**
  * This enumeration is used in the {@link DatabaseField} annotation 
@@ -29,8 +20,8 @@ public enum DataType {
 	
 	AUTOMATIC {
 		@Override
-		public Object extractFieldValueRaw(ResultSet rs, String fieldName) throws SQLException {
-			Object value = rs.getObject( fieldName );
+		public Object extractFieldValueRaw(ResultSet rs, int fieldIndex) throws SQLException {
+			Object value = rs.getObject( fieldIndex );
 			if ( value instanceof Array ) {
 				Array a = (Array) value;
 				return a.getArray();
@@ -45,8 +36,8 @@ public enum DataType {
 	 */
 	COMMON_TEXT {
 		@Override
-		public Object extractFieldValueRaw(ResultSet rs, String fieldName) throws SQLException {
-			String s = rs.getString( fieldName );
+		public Object extractFieldValueRaw(ResultSet rs, int fieldIndex) throws SQLException {
+			String s = rs.getString( fieldIndex );
 			return ( s == null ) ? null : s.intern();
 		}
 	},
@@ -59,64 +50,64 @@ public enum DataType {
 	
 	INT2 {
 		@Override
-		public Object extractFieldValueRaw(ResultSet rs, String fieldName) throws SQLException {
-			return rs.getShort(fieldName);
+		public Object extractFieldValueRaw(ResultSet rs, int fieldIndex) throws SQLException {
+			return rs.getShort(fieldIndex);
 		}
 	},
 	
 	INT4 {
 		@Override
-		public Object extractFieldValueRaw(ResultSet rs, String fieldName) throws SQLException {
-			return rs.getInt(fieldName);
+		public Object extractFieldValueRaw(ResultSet rs, int fieldIndex) throws SQLException {
+			return rs.getInt(fieldIndex);
 		}
 	},
 
 	INT8 {
 		@Override
-		public Object extractFieldValueRaw(ResultSet rs, String fieldName) throws SQLException {
-			return rs.getLong(fieldName);
+		public Object extractFieldValueRaw(ResultSet rs, int fieldIndex) throws SQLException {
+			return rs.getLong(fieldIndex);
 		}
 	},
 	
 	TEXT {
 		@Override
-		public Object extractFieldValueRaw(ResultSet rs, String fieldName) throws SQLException {
-			return rs.getString( fieldName );
+		public Object extractFieldValueRaw(ResultSet rs, int fieldIndex) throws SQLException {
+			return rs.getString( fieldIndex );
 		}
 	},
 	
 	REAL {
 		@Override
-		public Object extractFieldValueRaw(ResultSet rs, String fieldName) throws SQLException {
-			return rs.getDouble( fieldName );
+		public Object extractFieldValueRaw(ResultSet rs, int fieldIndex) throws SQLException {
+			return rs.getDouble( fieldIndex );
 		}
 	},
 
 	TIMESTAMP {
 		@Override
-		public Object extractFieldValueRaw(ResultSet rs, String fieldName) throws SQLException {
-			return rs.getTimestamp( fieldName );
+		public Object extractFieldValueRaw(ResultSet rs, int fieldIndex) throws SQLException {
+			return rs.getTimestamp( fieldIndex );
 		}
 	},
 
 	DATE {
 		@Override
-		public Object extractFieldValueRaw(ResultSet rs, String fieldName) throws SQLException {
-			return rs.getDate( fieldName );
+		public Object extractFieldValueRaw(ResultSet rs, int fieldIndex) throws SQLException {
+			return rs.getDate( fieldIndex );
 		}
 	},
 	
 	BOOLEAN {
 		@Override
-		public Object extractFieldValueRaw(ResultSet rs, String fieldName) throws SQLException {
-			return rs.getBoolean( fieldName );
+		public Object extractFieldValueRaw(ResultSet rs, int fieldIndex) throws SQLException {
+			return rs.getBoolean( fieldIndex );
 		}
 	},
 
 	SQL_ARRAY_INT4 {
 		@Override
-		public Object extractFieldValueRaw(ResultSet rs, String fieldName) throws SQLException {
-			Array integerSQLArray = rs.getArray(fieldName);
+		public Object extractFieldValueRaw(ResultSet rs, int fieldIndex) throws SQLException {
+			Array integerSQLArray = rs.getArray(fieldIndex);
 			if ( integerSQLArray == null ) {
 				return null;
 			} else {
@@ -127,8 +118,8 @@ public enum DataType {
 	
 	SQL_ARRAY_TEXT {
 		@Override
-		public Object extractFieldValueRaw(ResultSet rs, String fieldName) throws SQLException {
-			Array integerSQLArray = rs.getArray(fieldName);
+		public Object extractFieldValueRaw(ResultSet rs, int fieldIndex) throws SQLException {
+			Array integerSQLArray = rs.getArray(fieldIndex);
 			if ( integerSQLArray == null ) {
 				return null;
 			} else {
@@ -137,55 +128,10 @@ public enum DataType {
 		}
 	};
 
-	private static final Logger logger = Logger.getLogger(DataType.class.getCanonicalName());
-
-	
-	public <T> T extractFieldValue(ResultSet rs, String fieldName, Class<T> fieldType) throws SQLException {
-		return extractFieldValue(rs, fieldName, fieldType, false);
-	}
-	
-	public <T> T extractFieldValue(ResultSet rs, String fieldName, Class<T> fieldType, boolean allowPrimitiveDefaults) throws SQLException {
-		Object value = extractFieldValueRaw(rs, fieldName);
-		return makeAssignable(rs.getStatement().getConnection(), fieldType, value, allowPrimitiveDefaults);
-	}
-	
-	/*
-				// not an array, maybe it is a primitive?
-				if ( expectedType.isPrimitive() ) {
-					if ( value instanceof Number ) {
-						Number n = (Number) value;
-						if ( expectedType == Integer.TYPE ) {
-							return (T) n.intValue();
-						} else if ( expectedType == Long.TYPE ) {
-							return expectedType.cast(n.longValue());
-						} else if ( expectedType == Short.TYPE ) {
-							return expectedType.cast(n.shortValue());
-						} else if ( expectedType == Byte.TYPE ) {
-							return expectedType.cast(n.byteValue());
-						} else if ( expectedType == Double.TYPE ) {
-							return expectedType.cast(n.doubleValue());
-						} else if ( expectedType == Float.TYPE ) {
-							return expectedType.cast(n.floatValue());
-						}
-					} else if ( value instanceof Boolean ) {
-						Boolean b = (Boolean) value;
-						if ( expectedType == Boolean.TYPE ) return expectedType.cast(b.booleanValue());
-					} else if ( value instanceof Character ) {
-						Character c = (Character) value;
-						if ( expectedType == Character.TYPE ) return expectedType.cast(c.charValue());
-					} else if ( value instanceof CharSequence ) {
-						// in case if we not a String and we expect a char, we transfer a first character only
-						CharSequence cs = (CharSequence) value;
-						if ( cs.length() > 0 ) return expectedType.cast(cs.charAt(0));
-					}
-				}
-
-	 */
-
 	/**
 	 * This map holds default values for the primitive types (except Void.TYPE type)
 	 */
-	private static final Map<Class<?>, Object> primitiveDefaults = new HashMap<Class<?>, Object>() {
+	public static final Map<Class<?>, Object> primitiveDefaults = Collections.unmodifiableMap( new HashMap<Class<?>, Object>() {
 
 		private static final long serialVersionUID = -7481793517192394408L;
 
@@ -201,106 +147,13 @@ public enum DataType {
 			put(Double.TYPE    , 0.0d );
 		}
 		
-	};
+	} );
 	
-	/**
-	 * Make the given value assignable to the expected class type
-	 * @param <T> expected class type
-	 * @param expectedType expected class type
-	 * @param value value to be converted
-	 * @param allowPrimitiveDefaults if true, use default primitive values instead of null values
-	 * @return assignable value of type <code>expectedType</code>
-	 * @throws SQLException
-	 */
-	@SuppressWarnings("unchecked")
-	private static final <T> T makeAssignable(Connection connection, Class<T> expectedType, Object value, boolean allowPrimitiveDefaults) throws SQLException {
-		if ( value == null ) { 
-			if ( expectedType.isPrimitive() ) {
-				// primitive types cannot be null, we have to rewrite the value to it's default?
-				if ( allowPrimitiveDefaults ) {
-					if ( logger.isLoggable(Level.FINE) ) logger.fine("Primitive type " + expectedType.getName() + " expected, rewriting NULL to primitive type default");
-					return (T) primitiveDefaults.get(expectedType);
-				} else {
-					throw new SQLException("NULL value is not possible when filling a primitive type " + expectedType.getName() + ", if NULL values are needed, try to use not primitive wrapper classes as field types" );
-				}
-			} else {
-				return null;
-			}
-		}
-		
-		if ( expectedType.isInstance(value) ) {
-			// in normal case we should always get here (so the call to that method should not be very expensive)
-			return (T) value;
-		}
-
-		if ( expectedType.isPrimitive() ) {
-			// TODO: This part should be tested better
-			if ( value instanceof Number ) {
-				return (T) value;
-			} else if ( value instanceof Boolean ) {
-				if ( expectedType == Boolean.TYPE ) return (T) value;
-			} else if ( value instanceof Character ) {
-				if ( expectedType == Character.TYPE ) return (T) value;
-			} else if ( value instanceof CharSequence ) {
-				if ( expectedType == Character.TYPE ) {
-					// in case if we get a String and we expect a char, we transfer a first character only
-					CharSequence cs = (CharSequence) value;
-					if ( cs.length() > 0 ) {
-						Object c = cs.charAt(0);
-						return (T) c;
-					}
-				}
-			}
-		}
-				
-		// object is not compatible with the fieldType, will try to do something about that
-		// check if we are expecting an array
-		if ( expectedType.isArray() && value.getClass().isArray() ) {
-			// we expect an array type here, we have to rewrite the array in case an
-			final Object[] originalArray = (Object[]) value;
-			final Class<?> arrayComponentType = expectedType.getComponentType();
-			Object newArray = java.lang.reflect.Array.newInstance(arrayComponentType, originalArray.length );
-			for (int i = 0; i < originalArray.length; i++) {
-				final Object element = originalArray[i];
-				try {
-					java.lang.reflect.Array.set(newArray, i, makeAssignable(connection, arrayComponentType, element, allowPrimitiveDefaults) );
-				} catch (IllegalArgumentException e) {
-					// we have a NULL value, that is being assigned to the primitive array element. That is not possible
-					// skipping this assignment will leave an element with a default value.
-					
-					// actually, this should not happen now, as the value will be either substituted by the default value before 
-					// or an exception will be already thrown
-				}
-			}
-			return (T) newArray;
-		}
-		
-		// try to map PGObject
-		if ( value instanceof PGobject ) {
-			String objectValue = ((PGobject)value).getValue();
-			try {
-				List<String> elementList = PostgresUtils.postgresROW2StringList(objectValue, 128);
-				System.out.println(elementList);
-			} catch (RowParserException e) {
-				e.printStackTrace();
-			}
-		}
-		
-		// now try to find a constructor, that will accept the given value (for example Integer(int) )
-		try {
-			Constructor<T> expectedTypeConstructor = expectedType.getDeclaredConstructor(value.getClass());
-			return expectedTypeConstructor.newInstance(value);
-		} catch (Exception ignore) {
-			// Ok, the trick with the constructor did not work out, try the last String trick
-			if ( expectedType.isAssignableFrom(CharSequence.class) ) {
-				// expected type is String compatible, in this case we just convert our value into the string and pass it so
-				return (T) value.toString();
-			} 
-		} 
-		
-		throw new SQLException("Can not map recieved object of type " + value.getClass().getCanonicalName() + " to expected type " + expectedType.getCanonicalName() );
+	
+	abstract public Object extractFieldValueRaw(ResultSet rs, int fieldIndex) throws SQLException;
+	
+	public Object extractFieldValueRaw(ResultSet rs, String fieldName) throws SQLException {
+		return extractFieldValueRaw(rs, rs.findColumn(fieldName));
 	}
-	
-	abstract protected Object extractFieldValueRaw(ResultSet rs, String fieldName) throws SQLException;
 
 }
