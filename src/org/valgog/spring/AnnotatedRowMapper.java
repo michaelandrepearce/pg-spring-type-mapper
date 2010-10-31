@@ -207,7 +207,7 @@ public class AnnotatedRowMapper<ITEM>
 		if ( rs == null ) throw new NullPointerException("rs should be not null");
 
 		// get cached structure
-		final List<MappingDescriptor> descList = getCachedFieldMappingDescriptorList(itemClass);
+		final List<MappingDescriptor> descList = getFieldMappingDescriptorList(itemClass);
 		final Connection connection = rs.getStatement().getConnection();
 		// use the cache
 		for( MappingDescriptor desc : descList ) {
@@ -250,7 +250,13 @@ public class AnnotatedRowMapper<ITEM>
 
 	}
 
-	static final private <ItemTYPE> List<MappingDescriptor> getCachedFieldMappingDescriptorList(Class<ItemTYPE> itemClass) {
+	/**
+	 * Get a list of filed mapping descriptors for the given class type
+	 * @param <ItemTYPE> Type of the class, that is being introspected
+	 * @param itemClass Class defining the type of the class, that is being introspected
+	 * @return list of {@link MappingDescriptor} objects, defining the given class type
+	 */
+	static final private <ItemTYPE> List<MappingDescriptor> getFieldMappingDescriptorList(Class<ItemTYPE> itemClass) {
 		cacheReadLock.lock();
 		try {
 			List<MappingDescriptor> descList = mappingDescriptorCache.get(itemClass);
@@ -444,10 +450,23 @@ public class AnnotatedRowMapper<ITEM>
 		}
 		
 		// try to map PGObject
+		// this should be probably a ROW type, that we will try to map to some expected type
+		// as field names are not available for abstract ROWs
+		// we will try to map using field indexes
 		if ( value instanceof PGobject ) {
+			// get a string representation of the PGobject (is that really efficient?)
 			String objectValue = ((PGobject)value).getValue();
 			try {
+				// split the received ROW string to array of string representations of the field components
+				// and try to assign them to the expected type fields (using filed declaration index)
+				List<MappingDescriptor> descList = getFieldMappingDescriptorList(expectedType);
+				// optimization should be possible here, avoiding to create a temporary String List
 				List<String> elementList = PostgresUtils.postgresROW2StringList(objectValue, 128);
+				for (int i = 0, z = descList.size(); i < z; i++) {
+					final MappingDescriptor desc = descList.get(i);
+					final String elementValue = elementList.get(i);
+					// TODO: Construction Site 
+				}
 				System.out.println(elementList);
 			} catch (RowParserException e) {
 				e.printStackTrace();

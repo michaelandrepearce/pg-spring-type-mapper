@@ -155,5 +155,7 @@ public enum DataType {
 	public Object extractFieldValueRaw(ResultSet rs, String fieldName) throws SQLException {
 		return extractFieldValueRaw(rs, rs.findColumn(fieldName));
 	}
+	
+	// abstract Object fromString(String sourceString);
 
 }
