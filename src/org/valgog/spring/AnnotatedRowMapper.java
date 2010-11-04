@@ -212,7 +212,7 @@ public class AnnotatedRowMapper<ITEM>
 		// use the cache
 		for( MappingDescriptor desc : descList ) {
 			final Field classField = desc.getClassField();
-			final Class<?> expectedType = classField.getClass();
+			final Class<?> expectedType = classField.getType();
 			final Method classFieldSetter = desc.getClassFieldSetter();
 			final DataType dataType = desc.getDatabaseFieldType();
 			final String fieldName = desc.getDatabaseFieldName();
@@ -368,7 +368,7 @@ public class AnnotatedRowMapper<ITEM>
 		if (name == null || name.length() == 0) {
 			return name;
 		}
-		if (name.length() > 1 && Character.isUpperCase(name.charAt(0))){
+		if (Character.isUpperCase(name.charAt(0))){
 			return name;
 		}
 		char chars[] = name.toCharArray();
@@ -457,6 +457,7 @@ public class AnnotatedRowMapper<ITEM>
 			// get a string representation of the PGobject (is that really efficient?)
 			String objectValue = ((PGobject)value).getValue();
 			try {
+				T newObject = expectedType.newInstance();
 				// split the received ROW string to array of string representations of the field components
 				// and try to assign them to the expected type fields (using filed declaration index)
 				List<MappingDescriptor> descList = getFieldMappingDescriptorList(expectedType);
@@ -464,11 +465,32 @@ public class AnnotatedRowMapper<ITEM>
 				List<String> elementList = PostgresUtils.postgresROW2StringList(objectValue, 128);
 				for (int i = 0, z = descList.size(); i < z; i++) {
 					final MappingDescriptor desc = descList.get(i);
-					final String elementValue = elementList.get(i);
-					// TODO: Construction Site 
+					final String elementValue;
+					try {
+						elementValue = elementList.get(i);
+					} catch (IndexOutOfBoundsException e) {
+						if (desc.is(MappingOption.OPTIONAL)) continue;
+						throw e;
+					}
+					if (elementValue == null) continue; // skip nulls
+					T element = makeAssignableFromString(expectedType, elementValue);
+					Method setter = desc.getClassFieldSetter();
+					if (setter == null) {
+						desc.getClassField().set(newObject, element);
+					} else {
+						setter.invoke(newObject, element);
+					}
 				}
 				System.out.println(elementList);
 			} catch (RowParserException e) {
+				e.printStackTrace();
+			} catch (InstantiationException e) {
+				e.printStackTrace();
+			} catch (IllegalAccessException e) {
+				e.printStackTrace();
+			} catch (IllegalArgumentException e) {
+				e.printStackTrace();
+			} catch (InvocationTargetException e) {
 				e.printStackTrace();
 			}
 		}
@@ -486,7 +508,37 @@ public class AnnotatedRowMapper<ITEM>
 		} 
 		
 		throw new SQLException("Can not map recieved object of type " + value.getClass().getCanonicalName() + " to expected type " + expectedType.getCanonicalName() );
-	}	
+	}
+	
+	@SuppressWarnings("unchecked")
+	private static final <T> T makeAssignableFromString(Class<T> expectedType, String value) throws SQLException {
+		if ( value == null ) return null;
+		
+		if ( expectedType.isAssignableFrom(CharSequence.class) ) {
+			return (T) value.toString();
+		} else if ( expectedType.isAssignableFrom(Number.class) ) {
+			try {
+				Constructor<T> numericConstructor = expectedType.getDeclaredConstructor(String.class);
+				return numericConstructor.newInstance(value);
+			} catch (IllegalArgumentException e) {
+				e.printStackTrace();
+			} catch (InstantiationException e) {
+				e.printStackTrace();
+			} catch (IllegalAccessException e) {
+				e.printStackTrace();
+			} catch (InvocationTargetException e) {
+				e.printStackTrace();
+			} catch (SecurityException e) {
+				e.printStackTrace();
+			} catch (NoSuchMethodException e) {
+				e.printStackTrace();
+			}
+		}
+		
+		// TODO: Construction Site
+		return null;
+	}
+	
 	
 	public final ITEM mapRow(ResultSet rs, int rowNum) throws SQLException {
 		ITEM item = newItemInstance();
