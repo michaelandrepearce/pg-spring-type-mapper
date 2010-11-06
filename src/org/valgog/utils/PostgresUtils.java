@@ -4,6 +4,7 @@
 package org.valgog.utils;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import org.valgog.utils.RowParserException;
@@ -13,6 +14,16 @@ import org.valgog.utils.RowParserException;
  *
  */
 public class PostgresUtils {
+	
+	public static final List<String> postgresArray2StringList(String value) 
+	throws ArrayParserException {
+		if (!(value.startsWith("{") && value.endsWith("}")))
+			throw new ArrayParserException("postgresArray2StringList() ARRAY must begin with '{' and ends with '}': " + value);
+		if ( value.length() == 2 ) {
+			return Collections.emptyList();
+		}
+		throw new ArrayParserException("Array parser is not yet implemented");
+	}
 	
 	public static final List<String> postgresROW2StringList(String value, int appendStringSize) 
 	throws RowParserException
@@ -26,6 +37,7 @@ public class PostgresUtils {
 		
 		StringBuilder element = new StringBuilder(appendStringSize);
 		int i = 1;
+		// TODO: fix for inner ROWs
 		while (c[i] != ')')
 		{
 			if (c[i] == ',')

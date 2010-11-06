@@ -1,10 +1,10 @@
 package org.valgog.spring;
 
+import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -27,6 +27,7 @@ import org.valgog.spring.annotations.DataType;
 import org.valgog.spring.annotations.DatabaseField;
 import org.valgog.spring.annotations.DatabaseFieldNamePrefix;
 import org.valgog.spring.annotations.Optional;
+import org.valgog.utils.ArrayParserException;
 import org.valgog.utils.PostgresUtils;
 import org.valgog.utils.RowParserException;
 
@@ -456,6 +457,7 @@ public class AnnotatedRowMapper<ITEM>
 		if ( value instanceof PGobject ) {
 			// get a string representation of the PGobject (is that really efficient?)
 			String objectValue = ((PGobject)value).getValue();
+			// TODO: should implement adaptor based processor for PGobject values
 			try {
 				T newObject = expectedType.newInstance();
 				// split the received ROW string to array of string representations of the field components
@@ -483,15 +485,11 @@ public class AnnotatedRowMapper<ITEM>
 				}
 				System.out.println(elementList);
 			} catch (RowParserException e) {
-				e.printStackTrace();
+				throw new SQLException("Could not parse provided PGObject value: " + objectValue, e);
 			} catch (InstantiationException e) {
-				e.printStackTrace();
-			} catch (IllegalAccessException e) {
-				e.printStackTrace();
-			} catch (IllegalArgumentException e) {
-				e.printStackTrace();
-			} catch (InvocationTargetException e) {
-				e.printStackTrace();
+				throw new SQLException("Could not instansiate object of type " + expectedType.getCanonicalName(), e);
+			} catch (Exception e) {
+				throw new SQLException("Could not convert PGObject value to type " + expectedType.getCanonicalName(), e);
 			}
 		}
 		
@@ -507,7 +505,7 @@ public class AnnotatedRowMapper<ITEM>
 			} 
 		} 
 		
-		throw new SQLException("Can not map recieved object of type " + value.getClass().getCanonicalName() + " to expected type " + expectedType.getCanonicalName() );
+		throw new SQLException( String.format( "Can not map recieved object of type %s to expected type %s", value.getClass().getCanonicalName(), expectedType.getCanonicalName()));
 	}
 	
 	@SuppressWarnings("unchecked")
@@ -518,20 +516,28 @@ public class AnnotatedRowMapper<ITEM>
 			return (T) value.toString();
 		} else if ( expectedType.isAssignableFrom(Number.class) ) {
 			try {
-				Constructor<T> numericConstructor = expectedType.getDeclaredConstructor(String.class);
-				return numericConstructor.newInstance(value);
-			} catch (IllegalArgumentException e) {
-				e.printStackTrace();
-			} catch (InstantiationException e) {
-				e.printStackTrace();
-			} catch (IllegalAccessException e) {
-				e.printStackTrace();
-			} catch (InvocationTargetException e) {
-				e.printStackTrace();
-			} catch (SecurityException e) {
-				e.printStackTrace();
-			} catch (NoSuchMethodException e) {
-				e.printStackTrace();
+				Constructor<T> numberConstructor = expectedType.getDeclaredConstructor(String.class);
+				return numberConstructor.newInstance(value);
+			} catch (Exception e) {
+				throw new SQLException( String.format("Could not parse given string [%s] as type %s", value, expectedType.getCanonicalName() ), e );
+			}
+		} else if ( expectedType.isPrimitive() ) {
+			
+		} else if ( expectedType.isArray() ) {
+			Class<?> arrayComponentType = expectedType.getComponentType();
+			// string should contain PostgreSQL array
+			try {
+				List<String> arrayElementValueList = PostgresUtils.postgresArray2StringList(value);
+				final int arraySize = arrayElementValueList.size();
+				T resultArray = (T) Array.newInstance(arrayComponentType, arraySize );
+				for (int i = 0; i < arraySize; i++) {
+					String elementValue = arrayElementValueList.get(i);
+					if ( elementValue == null ) continue;
+					Array.set(resultArray, i, makeAssignableFromString(arrayComponentType, elementValue));
+				}
+				return resultArray;
+			} catch (ArrayParserException e) {
+				throw new SQLException(e);
 			}
 		}
 		
