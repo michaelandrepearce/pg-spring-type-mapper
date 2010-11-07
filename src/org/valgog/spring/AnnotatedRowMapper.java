@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.locks.Lock;
@@ -30,6 +31,8 @@ import org.valgog.spring.annotations.Optional;
 import org.valgog.utils.ArrayParserException;
 import org.valgog.utils.PostgresUtils;
 import org.valgog.utils.RowParserException;
+
+import com.sun.corba.se.impl.ior.NewObjectKeyTemplateBase;
 
 /**
  * This class defines a database row mapper to be able to map hierarchy of classes with properties with defined setters, 
@@ -171,6 +174,16 @@ public class AnnotatedRowMapper<ITEM>
 		public Method getClassFieldSetter() {
 			return classFieldSetter;
 		}
+		public Class<?> getClassFieldType() {
+			if ( classField != null ) {
+				return classField.getType();
+			} else if ( classFieldSetter != null ) {
+				return classFieldSetter.getParameterTypes()[0];
+			} else {
+				return null;
+			}
+		}
+		
 		public DataType getDatabaseFieldType(){
 			return databaseFieldType;
 		}
@@ -467,6 +480,7 @@ public class AnnotatedRowMapper<ITEM>
 				List<String> elementList = PostgresUtils.postgresROW2StringList(objectValue, 128);
 				for (int i = 0, z = descList.size(); i < z; i++) {
 					final MappingDescriptor desc = descList.get(i);
+					final Class<?> expectedFieldType = desc.getClassFieldType();
 					final String elementValue;
 					try {
 						elementValue = elementList.get(i);
@@ -475,7 +489,7 @@ public class AnnotatedRowMapper<ITEM>
 						throw e;
 					}
 					if (elementValue == null) continue; // skip nulls
-					T element = makeAssignableFromString(expectedType, elementValue);
+					Object element = makeAssignableFromString(expectedFieldType, elementValue);
 					Method setter = desc.getClassFieldSetter();
 					if (setter == null) {
 						desc.getClassField().set(newObject, element);
@@ -483,7 +497,8 @@ public class AnnotatedRowMapper<ITEM>
 						setter.invoke(newObject, element);
 					}
 				}
-				System.out.println(elementList);
+				// TODO: add warning if the value is not depleted
+				return newObject;
 			} catch (RowParserException e) {
 				throw new SQLException("Could not parse provided PGObject value: " + objectValue, e);
 			} catch (InstantiationException e) {
@@ -499,7 +514,7 @@ public class AnnotatedRowMapper<ITEM>
 			return expectedTypeConstructor.newInstance(value);
 		} catch (Exception ignore) {
 			// Ok, the trick with the constructor did not work out, try the last String trick
-			if ( expectedType.isAssignableFrom(CharSequence.class) ) {
+			if ( CharSequence.class.isAssignableFrom(expectedType) ) {
 				// expected type is String compatible, in this case we just convert our value into the string and pass it so
 				return (T) value.toString();
 			} 
@@ -512,17 +527,36 @@ public class AnnotatedRowMapper<ITEM>
 	private static final <T> T makeAssignableFromString(Class<T> expectedType, String value) throws SQLException {
 		if ( value == null ) return null;
 		
-		if ( expectedType.isAssignableFrom(CharSequence.class) ) {
+		if ( CharSequence.class.isAssignableFrom(expectedType) ) {
 			return (T) value.toString();
-		} else if ( expectedType.isAssignableFrom(Number.class) ) {
-			try {
-				Constructor<T> numberConstructor = expectedType.getDeclaredConstructor(String.class);
-				return numberConstructor.newInstance(value);
-			} catch (Exception e) {
-				throw new SQLException( String.format("Could not parse given string [%s] as type %s", value, expectedType.getCanonicalName() ), e );
-			}
 		} else if ( expectedType.isPrimitive() ) {
-			
+			if ( value.isEmpty() ) {
+				throw new SQLException( String.format("Expected primitive type %s cannot be converted from an empty string", expectedType.getCanonicalName()));
+			}
+			if ( expectedType == Boolean.TYPE || expectedType == Boolean.class ) {
+				final String b = value.trim().toLowerCase(Locale.US);
+				if ( b.equals("true") || b.equals("t") || b.equals("1") ) {
+					return (T) Boolean.TRUE;
+				} else if ( b.equals("false") || b.equals("f") || b.equals("0") ) {
+					return (T) Boolean.FALSE;
+				} else {
+					throw new SQLException( String.format("Could not convert given string %s to Boolean", value) );
+				}
+			} else if ( expectedType == Character.TYPE || expectedType == Character.class ) {
+				return (T) Character.valueOf(value.charAt(0));
+			} else if ( expectedType == Byte.TYPE || expectedType == Byte.class ) {
+				return (T) Byte.valueOf(value);
+			} else if ( expectedType == Short.TYPE || expectedType == Short.class ) {
+				return (T) Short.valueOf(value);
+			} else if ( expectedType == Integer.TYPE || expectedType == Integer.class ) {
+				return (T) Integer.valueOf(value);
+			} else if ( expectedType == Long.TYPE || expectedType == Long.class ) {
+				return (T) Long.valueOf(value);
+			} else if ( expectedType == Float.TYPE || expectedType == Float.class ) {
+				return (T) Float.valueOf(value);
+			} else if ( expectedType == Double.TYPE || expectedType == Double.class ) {
+				return (T) Double.valueOf(value);
+			} 
 		} else if ( expectedType.isArray() ) {
 			Class<?> arrayComponentType = expectedType.getComponentType();
 			// string should contain PostgreSQL array
@@ -542,7 +576,7 @@ public class AnnotatedRowMapper<ITEM>
 		}
 		
 		// TODO: Construction Site
-		return null;
+		throw new SQLException( String.format("Convertion of value [%s] to class %s is not yet supported", value, expectedType.getCanonicalName()));
 	}
 	
 	

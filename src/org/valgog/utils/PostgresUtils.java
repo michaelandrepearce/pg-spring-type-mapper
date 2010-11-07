@@ -11,92 +11,73 @@ import org.valgog.utils.RowParserException;
 
 /**
  * @author valgog
- *
+ * 
  */
 public class PostgresUtils {
-	
-	public static final List<String> postgresArray2StringList(String value) 
-	throws ArrayParserException {
+
+	public static final List<String> postgresArray2StringList(String value) throws ArrayParserException {
 		if (!(value.startsWith("{") && value.endsWith("}")))
-			throw new ArrayParserException("postgresArray2StringList() ARRAY must begin with '{' and ends with '}': " + value);
-		if ( value.length() == 2 ) {
+			throw new ArrayParserException(String.format("postgresArray2StringList() ARRAY must begin with '{' and ends with '}': %s", value));
+		if (value.length() == 2) {
 			return Collections.emptyList();
 		}
 		throw new ArrayParserException("Array parser is not yet implemented");
 	}
-	
-	public static final List<String> postgresROW2StringList(String value, int appendStringSize) 
-	throws RowParserException
-	{
+
+	public static final List<String> postgresROW2StringList(String value, int appendStringSize) throws RowParserException {
 		if (!(value.startsWith("(") && value.endsWith(")")))
 			throw new RowParserException("postgresROW2StringList() ROW must begin with '(' and ends with ')': " + value);
-		
+
 		List<String> result = new ArrayList<String>();
-		
+
 		char[] c = value.toCharArray();
-		
+
 		StringBuilder element = new StringBuilder(appendStringSize);
+		// this processor will fail if value has spaces between ',' and '"' or ')'
 		int i = 1;
-		// TODO: fix for inner ROWs
-		while (c[i] != ')')
-		{
-			if (c[i] == ',')
-			{
-				if (c[i+1] == ',')
-				{
-					result.add(new String());
-				}else if (c[i+1] == ')')
-				{
-					result.add(new String());
+		while (c[i] != ')') {
+			if (c[i] == ',') {
+				char nextChar = c[i + 1];
+				if (nextChar == ',' || nextChar == ')') {
+					// we have an empty position, that is we have a NULL value
+					result.add(null);
 				}
 				i++;
-			}else if (c[i] == '\"')
-			{
+			} else if (c[i] == '\"') {
 				i++;
 				boolean insideQuote = true;
-				while(insideQuote)
-				{
+				while (insideQuote) {
 					char nextChar = c[i + 1];
-					if(c[i] == '\"')
-					{
-						if (nextChar == ',' || nextChar == ')')
-						{
+					if (c[i] == '\"') {
+						if (nextChar == ',' || nextChar == ')') {
 							result.add(element.toString());
 							element = new StringBuilder(appendStringSize);
 							insideQuote = false;
-						}else if(nextChar == '\"')
-						{
+						} else if (nextChar == '\"') {
 							i++;
 							element.append(c[i]);
-						}else
-						{
+						} else {
 							throw new RowParserException("postgresROW2StringList() char after \" is not valid");
 						}
-					}else if (c[i] == '\\')
-					{
-						if(nextChar == '\\' || nextChar == '\"')
-						{
+					} else if (c[i] == '\\') {
+						if (nextChar == '\\' || nextChar == '\"') {
 							i++;
 							element.append(c[i]);
-						}else
-						{
+						} else {
 							throw new RowParserException("postgresROW2StringList() char after \\ is not valid");
 						}
-					}else
-					{
+					} else {
 						element.append(c[i]);
 					}
 					i++;
 				}
-			}else
-			{
-				while(!(c[i] == ',' || c[i] == ')'))
-				{
+			} else {
+				while (!(c[i] == ',' || c[i] == ')')) {
 					element.append(c[i]);
 					i++;
-					
 				}
-				result.add(element.toString());
+				// if the element was not quoted and was empty, it is supposed to be NULL
+				result.add(element.length() > 0 ? element.toString() : null );
 				element = new StringBuilder(appendStringSize);
 			}
 		}

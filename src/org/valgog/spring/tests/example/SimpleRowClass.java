@@ -5,7 +5,7 @@ import org.valgog.spring.annotations.DatabaseField;
 public class SimpleRowClass {
 	
 	@DatabaseField(name = "st")
-	private SimpleObject simpleObject;
+	private SimpleClass simpleObject;
 	
 	/*
 	 * Setters and getters
@@ -13,11 +13,11 @@ public class SimpleRowClass {
 	 * Setters should be defined and public for the fields being mapped
 	 * 
 	 */
-	public void setSimpleObject(SimpleObject simpleObject) {
+	public void setSimpleObject(SimpleClass simpleObject) {
 		this.simpleObject = simpleObject;
 	}
 
-	public SimpleObject getSimpleObject() {
+	public SimpleClass getSimpleObject() {
 		return simpleObject;
 	}
 }

@@ -3,6 +3,7 @@ package org.valgog.spring.tests.example;
 import org.valgog.spring.annotations.DataType;
 import org.valgog.spring.annotations.DatabaseField;
 import org.valgog.spring.annotations.AllowPrimitiveDefaults;
+import org.valgog.spring.annotations.Optional;
 
 public class SimpleClass {
 	
@@ -19,6 +20,7 @@ public class SimpleClass {
 	private int[] lastMarks;
 
 	@DatabaseField(name = "tags")
+	@Optional
 	private String[] tags;
 
 	/*

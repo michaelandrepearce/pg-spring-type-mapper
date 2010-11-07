@@ -3,6 +3,7 @@ package org.valgog.spring.tests;
 import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThat;
 
 import java.sql.Connection;
@@ -13,6 +14,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Properties;
 
+import org.hamcrest.core.IsNull;
 import org.junit.Before;
 import org.junit.Test;
 import org.valgog.spring.AnnotatedRowMapper;
@@ -129,15 +131,21 @@ public class MappingTest {
 	@Test()
 	public void testRowMapRow() throws SQLException {
 		
-		PreparedStatement ps = conn.prepareStatement("SELECT ROW(1,'a','b',NULL)::test.simple_type as st");
+		PreparedStatement ps = conn.prepareStatement("SELECT ROW(1,'a','DE',NULL)::test.simple_type as st");
 		ResultSet rs = ps.executeQuery();
 		AnnotatedRowMapper<SimpleRowClass> mapper = AnnotatedRowMapper.getMapperForClass(SimpleRowClass.class);
 		int i = 0;
 		while( rs.next() ) {
 			SimpleRowClass row = mapper.mapRow(rs, i++);
 			assertNotNull(row);
+			SimpleClass simpleObject = row.getSimpleObject();
+			assertNotNull(simpleObject);
+			assertThat(simpleObject.getId(), is( 1 ));
+			assertThat(simpleObject.getName(), is ( "a" ));
+			assertThat(simpleObject.getCountryCode(), is ( "DE" ));
+			assertNull(simpleObject.getLastMarks());
+			assertNull(simpleObject.getTags());
 		}
-
 	}	
 
 
