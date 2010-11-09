@@ -1,14 +1,17 @@
 package org.valgog.spring.tests.example;
 
+import java.util.List;
+
 import org.valgog.spring.annotations.DataType;
 import org.valgog.spring.annotations.DatabaseField;
 import org.valgog.spring.annotations.AllowPrimitiveDefaults;
+import org.valgog.spring.annotations.GenericParameters;
 import org.valgog.spring.annotations.Optional;
 
 public class SimpleClass {
 	
 	@DatabaseField(name = "id")
-	private int id;
+	private Integer id;
 
 	@DatabaseField(name = "name")
 	private String name;
@@ -22,6 +25,11 @@ public class SimpleClass {
 	@DatabaseField(name = "tags")
 	@Optional
 	private String[] tags;
+	
+	@DatabaseField
+	@Optional
+	@GenericParameters(String.class)
+	public List<String> genericTags;
 
 	/*
 	 * Setters and getters
@@ -29,11 +37,11 @@ public class SimpleClass {
 	 * Setters should be defined and public for the fields being mapped
 	 * 
 	 */
-	public int getId() {
+	public Integer getId() {
 		return id;
 	}
 
-	public void setId(int id) {
+	public void setId(Integer id) {
 		this.id = id;
 	}
 

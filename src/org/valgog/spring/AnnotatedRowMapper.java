@@ -5,10 +5,14 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.lang.reflect.Type;
+import java.lang.reflect.TypeVariable;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
@@ -251,10 +255,8 @@ public class AnnotatedRowMapper<ITEM>
 				} else {
 					classField.set(item, value);
 				}
-				
-				
 			} catch (IllegalAccessException e) {
-				logger.warning(e.getMessage());
+				throw new SQLException( String.format("Could not find a corresponding setter for private field [%s]", classField.toString() ), e );
 			} catch (InvocationTargetException e) {
 				Throwable t = e.getCause();
 				if ( t instanceof SQLException ) throw (SQLException) t;
@@ -316,10 +318,9 @@ public class AnnotatedRowMapper<ITEM>
 		// get global field name prefix if defined
 		DatabaseFieldNamePrefix fieldNamePrefixAnnotation = itemClass.getAnnotation(DatabaseFieldNamePrefix.class);
 		String globalPrefix = fieldNamePrefixAnnotation == null ? null : fieldNamePrefixAnnotation.value();
-		int databaseFieldIndex = 0;
+		int databaseFieldIndex = superClassDatabaseFieldCount;
 		Field[] itemFields = itemClass.getDeclaredFields();
 		for (int i = 0 ; i < itemFields.length ; i++ ) {
-			databaseFieldIndex = superClassDatabaseFieldCount + 1 + i;
 			final Field field = itemFields[i];
 			final String fieldName = field.getName();
 			if ( field.isSynthetic() ) continue;
@@ -363,6 +364,7 @@ public class AnnotatedRowMapper<ITEM>
 					}
 				}
 			}
+			databaseFieldIndex += 1;
 			MappingDescriptor desc = new MappingDescriptor(
 					field, 
 					setter,
@@ -443,25 +445,59 @@ public class AnnotatedRowMapper<ITEM>
 				
 		// object is not compatible with the fieldType, will try to do something about that
 		// check if we are expecting an array
-		if ( expectedType.isArray() && value.getClass().isArray() ) {
-			// we expect an array type here, we have to rewrite the array in case an
-			final Object[] originalArray = (Object[]) value;
+		if ( expectedType.isArray() ) {
 			final Class<?> arrayComponentType = expectedType.getComponentType();
-			Object newArray = java.lang.reflect.Array.newInstance(arrayComponentType, originalArray.length );
-			for (int i = 0; i < originalArray.length; i++) {
-				final Object element = originalArray[i];
-				try {
-					java.lang.reflect.Array.set(newArray, i, makeAssignable(connection, arrayComponentType, element, allowPrimitiveDefaults) );
-				} catch (IllegalArgumentException e) {
-					// we have a NULL value, that is being assigned to the primitive array element. That is not possible
-					// skipping this assignment will leave an element with a default value.
-					
-					// actually, this should not happen now, as the value will be either substituted by the default value before 
-					// or an exception will be already thrown
+			if ( value.getClass().isArray() ) {
+				// got java array, rewrite it's components into the expectedType components
+				final Object[] originalArray = (Object[]) value;
+				Object newArray = java.lang.reflect.Array.newInstance(arrayComponentType, originalArray.length );
+				for (int i = 0; i < originalArray.length; i++) {
+					final Object element = originalArray[i];
+					try {
+						java.lang.reflect.Array.set(newArray, i, makeAssignable(connection, arrayComponentType, element, allowPrimitiveDefaults) );
+					} catch (IllegalArgumentException e) {
+						// we have a NULL value, that is being assigned to the primitive array element. That is not possible
+						// skipping this assignment will leave an element with a default value.
+						
+						// actually, this should not happen now, as the value will be either substituted by the default value before 
+						// or an exception will be already thrown
+					}
 				}
+				return (T) newArray;
+			} else if ( value instanceof java.sql.Array ) {
+				// extract JDDB Array and convert it into the expected type
+				java.sql.Array a = (java.sql.Array) value;
+				List<Object> l = new ArrayList<Object>();
+				ResultSet ars = a.getResultSet();
+				while( ars.next() ) {
+					l.add( makeAssignable( connection, arrayComponentType, ars.getObject(2), allowPrimitiveDefaults ) );
+				}
+				// do some magic to re-pack the Object array into a primitive array
+				Object newArray = java.lang.reflect.Array.newInstance(arrayComponentType, l.size() );
+				for (int i = 0, j = l.size(); i < j; i++ ) {
+					java.lang.reflect.Array.set(newArray, i, l.get(i));
+				}
+				return (T) newArray;
 			}
-			return (T) newArray;
 		}
+		/*
+		if ( List.class.isAssignableFrom(expectedType) && value.getClass().isArray() ) {
+			final Object[] originalArray = (Object[]) value;
+			// as generic class info is erased in runtime, we will suppose, that database type is compatible with the expected classes
+			final Class<?> arrayComponentType = value.getClass().getComponentType();
+			List<Object> newList;
+			try {
+				newList = (List<Object>) expectedType.newInstance();
+				for (int i = 0; i < originalArray.length; i++) {
+					final Object element = originalArray[i];
+					// oh, we will get horrible runtime exceptions if the database type will not fit the generic collection parameter type
+					newList.add( makeAssignable( connection, arrayComponentType, element, allowPrimitiveDefaults ) );
+				}
+			} catch (InstantiationException e) {
+			} catch (IllegalAccessException e) {
+			}
+		}
+		*/
 		
 		// try to map PGObject
 		// this should be probably a ROW type, that we will try to map to some expected type
@@ -533,30 +569,30 @@ public class AnnotatedRowMapper<ITEM>
 			if ( value.isEmpty() ) {
 				throw new SQLException( String.format("Expected primitive type %s cannot be converted from an empty string", expectedType.getCanonicalName()));
 			}
-			if ( expectedType == Boolean.TYPE || expectedType == Boolean.class ) {
-				final String b = value.trim().toLowerCase(Locale.US);
-				if ( b.equals("true") || b.equals("t") || b.equals("1") ) {
-					return (T) Boolean.TRUE;
-				} else if ( b.equals("false") || b.equals("f") || b.equals("0") ) {
-					return (T) Boolean.FALSE;
-				} else {
-					throw new SQLException( String.format("Could not convert given string %s to Boolean", value) );
-				}
-			} else if ( expectedType == Character.TYPE || expectedType == Character.class ) {
-				return (T) Character.valueOf(value.charAt(0));
-			} else if ( expectedType == Byte.TYPE || expectedType == Byte.class ) {
-				return (T) Byte.valueOf(value);
-			} else if ( expectedType == Short.TYPE || expectedType == Short.class ) {
-				return (T) Short.valueOf(value);
-			} else if ( expectedType == Integer.TYPE || expectedType == Integer.class ) {
-				return (T) Integer.valueOf(value);
-			} else if ( expectedType == Long.TYPE || expectedType == Long.class ) {
-				return (T) Long.valueOf(value);
-			} else if ( expectedType == Float.TYPE || expectedType == Float.class ) {
-				return (T) Float.valueOf(value);
-			} else if ( expectedType == Double.TYPE || expectedType == Double.class ) {
-				return (T) Double.valueOf(value);
-			} 
+		}
+		if ( expectedType == Boolean.TYPE || expectedType == Boolean.class ) {
+			final String b = value.trim().toLowerCase(Locale.US);
+			if ( b.equals("true") || b.equals("t") || b.equals("1") ) {
+				return (T) Boolean.TRUE;
+			} else if ( b.equals("false") || b.equals("f") || b.equals("0") ) {
+				return (T) Boolean.FALSE;
+			} else {
+				throw new SQLException( String.format("Could not convert given string %s to Boolean", value) );
+			}
+		} else if ( expectedType == Character.TYPE || expectedType == Character.class ) {
+			return (T) Character.valueOf(value.charAt(0));
+		} else if ( expectedType == Byte.TYPE || expectedType == Byte.class ) {
+			return (T) Byte.valueOf(value);
+		} else if ( expectedType == Short.TYPE || expectedType == Short.class ) {
+			return (T) Short.valueOf(value);
+		} else if ( expectedType == Integer.TYPE || expectedType == Integer.class ) {
+			return (T) Integer.valueOf(value);
+		} else if ( expectedType == Long.TYPE || expectedType == Long.class ) {
+			return (T) Long.valueOf(value);
+		} else if ( expectedType == Float.TYPE || expectedType == Float.class ) {
+			return (T) Float.valueOf(value);
+		} else if ( expectedType == Double.TYPE || expectedType == Double.class ) {
+			return (T) Double.valueOf(value);
 		} else if ( expectedType.isArray() ) {
 			Class<?> arrayComponentType = expectedType.getComponentType();
 			// string should contain PostgreSQL array

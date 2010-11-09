@@ -22,10 +22,6 @@ public enum DataType {
 		@Override
 		public Object extractFieldValueRaw(ResultSet rs, int fieldIndex) throws SQLException {
 			Object value = rs.getObject( fieldIndex );
-			if ( value instanceof Array ) {
-				Array a = (Array) value;
-				return a.getArray();
-			}
 			return value;
 		}
 	},
