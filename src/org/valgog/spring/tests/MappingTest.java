@@ -14,16 +14,20 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Properties;
 
+import org.apache.log4j.Logger;
 import org.hamcrest.core.IsNull;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
 import org.valgog.spring.AnnotatedRowMapper;
+import org.valgog.spring.tests.example.ParentClass;
 import org.valgog.spring.tests.example.SimpleClass;
 import org.valgog.spring.tests.example.ExtendedClass;
 import org.valgog.spring.tests.example.SimpleRowClass;
 
 public class MappingTest {
+	
+	private static final Logger LOG = Logger.getLogger(MappingTest.class);
 
 	private Connection conn;
 	
@@ -60,6 +64,14 @@ public class MappingTest {
 			"  name text, \n" +
 			"  country_code text, \n" +
 			"  last_marks int[] \n" +
+			"); \n" +
+			"CREATE TYPE test.child_child_type AS ( \n" +
+			"  id integer\n" +
+			"); \n" +
+			"CREATE TYPE test.child_type AS ( \n" +
+			"  id integer,\n" +
+			"  child test.child_child_type,\n" +
+			"  children test.child_child_type[]\n" +
 			"); \n" ;
 		s.execute(SQL);
 		conn.commit();
@@ -115,8 +127,7 @@ public class MappingTest {
 
 	}	
 	
-	@Test(expected=SQLException.class)
-	@Ignore
+	@Test
 	public void testPrimitiveMapRow() throws SQLException {
 		
 		PreparedStatement ps = conn.prepareStatement("SELECT NULL as id, 'Muster' as name, 'DE' as country_code, '{1,1,3,1, NULL}'::int4[] as last_marks, '{a,b,c}'::text[] as tags");
@@ -124,8 +135,8 @@ public class MappingTest {
 		AnnotatedRowMapper<SimpleClass> mapper = AnnotatedRowMapper.getMapperForClass(SimpleClass.class);
 		int i = 0;
 		while( rs.next() ) {
-			mapper.mapRow(rs, i++);
-			// should throw an exception
+			SimpleClass result = mapper.mapRow(rs, i++);
+			LOG.info(result);
 		}
 
 	}	
@@ -149,6 +160,27 @@ public class MappingTest {
 			assertNull(simpleObject.getTags());
 		}
 	}	
+	
+	@Test()
+	public void testRowMapRowComplex() throws SQLException {
+		
+		PreparedStatement ps = conn.prepareStatement("SELECT ARRAY[ROW(1, null, null)::test.child_type, ROW(2, ROW(1), null)::test.child_type, ROW(2, ROW(1), ARRAY[ROW(1)]::test.child_child_type[])::test.child_type]::test.child_type[] as children");
+		ResultSet rs = ps.executeQuery();
+		AnnotatedRowMapper<ParentClass> mapper = AnnotatedRowMapper.getMapperForClass(ParentClass.class);
+		int i = 0;
+		while( rs.next() ) {
+			ParentClass row = mapper.mapRow(rs, i++);
+			assertNotNull(row);
+			assertThat(3, is(row.getChildren().size()));
+			assertNotNull(row.getChildren().get(0).getId());
+			assertNull(row.getChildren().get(0).getChild());
+			assertNotNull(row.getChildren().get(1).getChild());
+			assertNotNull(row.getChildren().get(1).getChild().getId());
+			assertNotNull(row.getChildren().get(2).getChildren());
+			assertThat(1, is(row.getChildren().get(2).getChildren().size()));
+			assertThat(1, is(row.getChildren().get(2).getChildren().get(0).getId()));
+		}
+	}		
 
 
 }

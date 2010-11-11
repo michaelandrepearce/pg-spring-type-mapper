@@ -83,5 +83,78 @@ public class PostgresUtils {
 		}
 		return result;
 	}
+	
+    public static List<String> getStringList(final String value) throws RowParserException {
+        if (value == null) {
+            return null;
+        }
+
+        String myValue = null;
+        if (value.length() > 0) {
+            if (value.startsWith("{") && value.endsWith("}")) {
+                if (value.length() == 2) {
+                    // special case for empty postgres array ("{}")
+                    return new ArrayList<String>(0);
+                }
+                myValue = "(" + value.substring(1, value.length() - 1) + ")";
+            } else {
+                myValue = value;
+            }
+        } else {
+            return null;
+        }
+        return postgresROW2StringList(myValue, 0);
+    }	
+    
+    public static List<String> getArrayElements(final String serializedArray) {
+
+        final List<String> elements = new ArrayList<String>();
+
+        int currentPositionInString = 0;
+
+        while (currentPositionInString != -1) {
+            currentPositionInString = fetchElement(currentPositionInString, serializedArray,
+                    elements);
+        }
+
+        return elements;
+    }
+    
+    private static int fetchElement(final int fromIndex, final String serializedArray, final List<String> elements) {
+
+        int n = serializedArray.indexOf('(', fromIndex) + 1;
+
+        // we did not find something...
+        if (n == 0) {
+            return -1;
+        }
+
+        int depth = 0;
+
+        final StringBuffer elementBuffer = new StringBuffer().append('(');
+
+        while (n < serializedArray.length()) {
+
+            final char currentChar = serializedArray.charAt(n);
+
+            elementBuffer.append(currentChar);
+
+            if (currentChar == '(') {
+                depth++;
+            }
+            if (currentChar == ')' && depth == 0) {
+                break;
+            }
+            if (currentChar == ')' && depth != 0) {
+                depth--;
+            }
+
+            n++;
+        }
+
+        elements.add(elementBuffer.toString());
+
+        return n;
+    }    
 
 }

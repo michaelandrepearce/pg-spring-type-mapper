@@ -25,18 +25,22 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import org.postgresql.jdbc4.Jdbc4Array;
 import org.postgresql.util.PGobject;
 import org.springframework.jdbc.core.simple.ParameterizedRowMapper;
 import org.valgog.spring.annotations.AllowPrimitiveDefaults;
 import org.valgog.spring.annotations.DataType;
 import org.valgog.spring.annotations.DatabaseField;
 import org.valgog.spring.annotations.DatabaseFieldNamePrefix;
+import org.valgog.spring.annotations.GenericParameters;
 import org.valgog.spring.annotations.Optional;
 import org.valgog.utils.ArrayParserException;
+import org.valgog.utils.ComplexTypeException;
 import org.valgog.utils.PostgresUtils;
 import org.valgog.utils.RowParserException;
 
 import com.sun.corba.se.impl.ior.NewObjectKeyTemplateBase;
+import com.sun.xml.internal.ws.api.model.wsdl.WSDLBoundOperation.ANONYMOUS;
 
 /**
  * This class defines a database row mapper to be able to map hierarchy of classes with properties with defined setters, 
@@ -161,15 +165,19 @@ public class AnnotatedRowMapper<ITEM>
 		final private DataType databaseFieldType;
 		final private String databaseFieldName;
 		final private int databaseFieldIndex;
+		final private Class genricClass;
+		final private int fieldIndex;
 		final private EnumSet<MappingOption> options;
 		
-		public MappingDescriptor(Field classField, Method classFieldSetter, DataType databaseFieldType, String databaseFieldName, int databaseFieldIndex, Set<MappingOption> options) {
+		public MappingDescriptor(Field classField, Method classFieldSetter, DataType databaseFieldType, String databaseFieldName, int databaseFieldIndex, Set<MappingOption> options, Class genricClass, int fieldIndex) {
 			this.classField = classField;
 			this.classFieldSetter = classFieldSetter;
 			this.databaseFieldType = databaseFieldType;
 			this.databaseFieldName = databaseFieldName;
 			this.databaseFieldIndex = databaseFieldIndex;
 			this.options = EnumSet.copyOf(options);
+			this.fieldIndex = fieldIndex;
+			this.genricClass =  genricClass;
 		}
 		
 		public Field getClassField() {
@@ -199,6 +207,13 @@ public class AnnotatedRowMapper<ITEM>
 		}
 		public boolean is(MappingOption option) {
 			return options.contains(option);
+		}
+		public Class getGenricClass() {
+			return genricClass;
+		}
+
+		public int getFieldIndex() {
+			return fieldIndex;
 		}
 		
 	}
@@ -248,7 +263,7 @@ public class AnnotatedRowMapper<ITEM>
 				
 				Object rawValue = dataType.extractFieldValueRaw(rs, fieldIndex);
 				
-				Object value = makeAssignable(connection, expectedType, rawValue, desc.is(MappingOption.ALLOW_PRIMITIVE_DEFAULTS));
+				Object value = makeAssignable(connection, expectedType, rawValue, desc.is(MappingOption.ALLOW_PRIMITIVE_DEFAULTS), desc.getGenricClass());
 				
 				if ( classFieldSetter != null ) {
 					classFieldSetter.invoke(item, value);
@@ -265,7 +280,7 @@ public class AnnotatedRowMapper<ITEM>
 		}
 
 	}
-
+	
 	/**
 	 * Get a list of filed mapping descriptors for the given class type
 	 * @param <ItemTYPE> Type of the class, that is being introspected
@@ -323,6 +338,7 @@ public class AnnotatedRowMapper<ITEM>
 		for (int i = 0 ; i < itemFields.length ; i++ ) {
 			final Field field = itemFields[i];
 			final String fieldName = field.getName();
+			
 			if ( field.isSynthetic() ) continue;
 			// find the setter 
 			Method setter;
@@ -338,6 +354,7 @@ public class AnnotatedRowMapper<ITEM>
 			}
 			EnumSet<MappingOption> mappingOptions = EnumSet.noneOf(MappingOption.class);
 			DatabaseField annotation = field.getAnnotation(DatabaseField.class);
+			
 			if ( annotation == null ) continue;
 			if ( field.isAnnotationPresent(AllowPrimitiveDefaults.class) ) {
 				mappingOptions.add(MappingOption.ALLOW_PRIMITIVE_DEFAULTS);
@@ -345,9 +362,17 @@ public class AnnotatedRowMapper<ITEM>
 			if ( field.isAnnotationPresent(Optional.class) ) {
 				mappingOptions.add(MappingOption.OPTIONAL);
 			}
-			
+			GenericParameters genricParamenters = field.getAnnotation(GenericParameters.class);
+			Class genericClass = null;
+			if (genricParamenters != null) {
+				Class[] genericClasses = genricParamenters.value();
+				if (genericClasses != null && genericClasses.length==1) {
+					genericClass = genericClasses[0];
+				}
+			}
 			DataType databaseFieldType = annotation.type();
 			String databaseFieldName = annotation.name();
+			final int fieldIndex = annotation.position();
 			if ( databaseFieldName == null || databaseFieldName.length() == 0 ) {
 				// generate name from the class field name
 				databaseFieldName = rewriteJavaPropertyNameToLowercaseUnderscoreName(fieldName);
@@ -371,7 +396,9 @@ public class AnnotatedRowMapper<ITEM>
 					databaseFieldType, 
 					databaseFieldName, 
 					databaseFieldIndex,
-					mappingOptions);
+					mappingOptions,
+					genericClass,
+					fieldIndex);
 			if ( logger.isLoggable(Level.FINE) ) {
 				logger.fine("Property " + fieldName + " will be filled with the value of the database field [" + String.valueOf( databaseFieldName ) + "] "); 
 			}
@@ -403,7 +430,7 @@ public class AnnotatedRowMapper<ITEM>
 	 * @throws SQLException
 	 */
 	@SuppressWarnings("unchecked")
-	private static final <T> T makeAssignable(Connection connection, Class<T> expectedType, Object value, boolean allowPrimitiveDefaults) throws SQLException {
+	private static final <T> T makeAssignable(Connection connection, Class<T> expectedType, Object value, boolean allowPrimitiveDefaults, Class genricType) throws SQLException {
 		if ( value == null ) { 
 			if ( expectedType.isPrimitive() ) {
 				// primitive types cannot be null, we have to rewrite the value to it's default?
@@ -454,7 +481,7 @@ public class AnnotatedRowMapper<ITEM>
 				for (int i = 0; i < originalArray.length; i++) {
 					final Object element = originalArray[i];
 					try {
-						java.lang.reflect.Array.set(newArray, i, makeAssignable(connection, arrayComponentType, element, allowPrimitiveDefaults) );
+						java.lang.reflect.Array.set(newArray, i, makeAssignable(connection, arrayComponentType, element, allowPrimitiveDefaults, null) );
 					} catch (IllegalArgumentException e) {
 						// we have a NULL value, that is being assigned to the primitive array element. That is not possible
 						// skipping this assignment will leave an element with a default value.
@@ -470,7 +497,7 @@ public class AnnotatedRowMapper<ITEM>
 				List<Object> l = new ArrayList<Object>();
 				ResultSet ars = a.getResultSet();
 				while( ars.next() ) {
-					l.add( makeAssignable( connection, arrayComponentType, ars.getObject(2), allowPrimitiveDefaults ) );
+					l.add( makeAssignable( connection, arrayComponentType, ars.getObject(2), allowPrimitiveDefaults, null ) );
 				}
 				// do some magic to re-pack the Object array into a primitive array
 				Object newArray = java.lang.reflect.Array.newInstance(arrayComponentType, l.size() );
@@ -525,7 +552,7 @@ public class AnnotatedRowMapper<ITEM>
 						throw e;
 					}
 					if (elementValue == null) continue; // skip nulls
-					Object element = makeAssignableFromString(expectedFieldType, elementValue);
+					Object element = makeAssignableFromString(expectedFieldType, elementValue, null);
 					Method setter = desc.getClassFieldSetter();
 					if (setter == null) {
 						desc.getClassField().set(newObject, element);
@@ -555,12 +582,92 @@ public class AnnotatedRowMapper<ITEM>
 				return (T) value.toString();
 			} 
 		} 
-		
+		if (value instanceof Jdbc4Array) {
+			
+			if (expectedType.isAssignableFrom(ArrayList.class)) {
+				List result =  new ArrayList();
+				if (genricType != null) {
+					Jdbc4Array array = (Jdbc4Array) value;
+					ResultSet set = array.getResultSet();
+					while (set.next()) {
+						Object current;
+						try {
+							current = genricType.newInstance();
+							fillChildObject(current, genricType, set.getString(2));
+							result.add(current);
+						} catch (InstantiationException e) {
+							// TODO Auto-generated catch block
+							e.printStackTrace();
+						} catch (IllegalAccessException e) {
+							// TODO Auto-generated catch block
+							e.printStackTrace();
+						}
+					}
+					
+				}
+				
+				logger.info(value.toString());	
+				return (T) result;
+			}
+			
+		}
 		throw new SQLException( String.format( "Can not map recieved object of type %s to expected type %s", value.getClass().getCanonicalName(), expectedType.getCanonicalName()));
 	}
 	
 	@SuppressWarnings("unchecked")
-	private static final <T> T makeAssignableFromString(Class<T> expectedType, String value) throws SQLException {
+	private static void fillChildObject(Object current, Class genricType, String string) {
+		List<MappingDescriptor> descList = getFieldMappingDescriptorList(genricType);
+		List<String> fieldValueList = null;
+		try {
+			fieldValueList = PostgresUtils.postgresROW2StringList(string, 0);
+			logger.info(fieldValueList.toString());
+		} catch (RowParserException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+			return;
+		}
+		
+		for( MappingDescriptor desc : descList ) {
+			try {
+				final Field classField = desc.getClassField();
+				final Class<?> expectedChildType = classField.getType();
+				final Method classFieldSetter = desc.getClassFieldSetter();
+				final DataType dataType = desc.getDatabaseFieldType();
+				int fieldIndex = desc.getFieldIndex();
+				String stringValue = null;
+				if (fieldIndex != -1) {
+					try {
+					stringValue = fieldValueList.get(fieldIndex);
+					} catch (IndexOutOfBoundsException e) {
+						logger.warning("Could not map " + genricType + " field " + classField);
+					}
+				}
+				Object element;
+				element = makeAssignableFromString(expectedChildType, stringValue, desc.getGenricClass());
+				
+				if (classFieldSetter == null) {
+					desc.getClassField().set(current, element);
+				} else {
+					classFieldSetter.invoke(current, element);
+				}
+			} catch (SQLException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			} catch (IllegalArgumentException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			} catch (IllegalAccessException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			} catch (InvocationTargetException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	private static final <T> T makeAssignableFromString(Class<T> expectedType, String value, Class genricType) throws SQLException {
 		if ( value == null ) return null;
 		
 		if ( CharSequence.class.isAssignableFrom(expectedType) ) {
@@ -603,16 +710,39 @@ public class AnnotatedRowMapper<ITEM>
 				for (int i = 0; i < arraySize; i++) {
 					String elementValue = arrayElementValueList.get(i);
 					if ( elementValue == null ) continue;
-					Array.set(resultArray, i, makeAssignableFromString(arrayComponentType, elementValue));
+					Array.set(resultArray, i, makeAssignableFromString(arrayComponentType, elementValue, null));
 				}
 				return resultArray;
 			} catch (ArrayParserException e) {
 				throw new SQLException(e);
 			}
 		}
-		
-		// TODO: Construction Site
-		throw new SQLException( String.format("Convertion of value [%s] to class %s is not yet supported", value, expectedType.getCanonicalName()));
+		try {
+			Object result =  expectedType.newInstance();
+			fillChildObject(result, expectedType, value);
+			return (T) result;
+
+		} catch (Exception e) {
+			logger.info("Result is not a class");
+		} 
+		if (expectedType.isAssignableFrom(ArrayList.class)) {
+			List result = new ArrayList();
+			List<String> values = null;
+			values = PostgresUtils.getArrayElements(value);
+			for (String currentValue : values) {
+				Object obj;
+				try {
+					obj = genricType.newInstance();
+					fillChildObject(obj, genricType, currentValue);
+					result.add(obj);
+				} catch (Exception e) {
+					logger.warning("could not map generic type");
+				} 
+				
+			}
+			return (T) result;
+		}
+		throw new SQLException();
 	}
 	
 	
