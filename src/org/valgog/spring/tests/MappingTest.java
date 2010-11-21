@@ -15,9 +15,7 @@ import java.sql.Statement;
 import java.util.Properties;
 
 import org.apache.log4j.Logger;
-import org.hamcrest.core.IsNull;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.valgog.spring.AnnotatedRowMapper;
 import org.valgog.spring.tests.example.ParentClass;
