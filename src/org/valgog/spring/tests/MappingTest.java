@@ -162,7 +162,7 @@ public class MappingTest {
 	@Test()
 	public void testRowMapRowComplex() throws SQLException {
 		
-		PreparedStatement ps = conn.prepareStatement("SELECT ARRAY[ROW(1, null, null)::test.child_type, ROW(2, ROW(1), null)::test.child_type, ROW(2, ROW(1), ARRAY[ROW(1)]::test.child_child_type[])::test.child_type]::test.child_type[] as children");
+		PreparedStatement ps = conn.prepareStatement("SELECT ARRAY[ROW(1, null, null)::test.child_type, ROW(2, ROW(1), null)::test.child_type, ROW(2, ROW(1), ARRAY[ROW(1)]::test.child_child_type[])::test.child_type]::test.child_type[] as children, ARRAY[ROW(1, null, null)::test.child_type, ROW(2, ROW(1), null)::test.child_type, ROW(2, ROW(1), ARRAY[ROW(1)]::test.child_child_type[])::test.child_type]::test.child_type[] as set");
 		ResultSet rs = ps.executeQuery();
 		AnnotatedRowMapper<ParentClass> mapper = AnnotatedRowMapper.getMapperForClass(ParentClass.class);
 		int i = 0;
@@ -170,6 +170,7 @@ public class MappingTest {
 			ParentClass row = mapper.mapRow(rs, i++);
 			assertNotNull(row);
 			assertThat(3, is(row.getChildren().size()));
+			assertThat(3, is(row.getChildrenSet().size()));
 			assertNotNull(row.getChildren().get(0).getId());
 			assertNull(row.getChildren().get(0).getChild());
 			assertNotNull(row.getChildren().get(1).getChild());

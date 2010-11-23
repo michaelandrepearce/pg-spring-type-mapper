@@ -11,8 +11,10 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -572,9 +574,13 @@ public class AnnotatedRowMapper<ITEM>
 			} 
 		} 
 		if (value instanceof Jdbc4Array) {
-			
+			Collection result =  null;
 			if (expectedType.isAssignableFrom(ArrayList.class)) {
-				List result =  new ArrayList();
+				result =  new ArrayList();
+			} else if (expectedType.isAssignableFrom(HashSet.class)) {
+				result =  new HashSet();
+			}
+			if (result != null) {
 				if (genricType != null) {
 					Jdbc4Array array = (Jdbc4Array) value;
 					ResultSet set = array.getResultSet();
