@@ -5,14 +5,12 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
+import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
-import java.lang.reflect.TypeVariable;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
@@ -32,15 +30,10 @@ import org.valgog.spring.annotations.AllowPrimitiveDefaults;
 import org.valgog.spring.annotations.DataType;
 import org.valgog.spring.annotations.DatabaseField;
 import org.valgog.spring.annotations.DatabaseFieldNamePrefix;
-import org.valgog.spring.annotations.GenericParameters;
 import org.valgog.spring.annotations.Optional;
 import org.valgog.utils.ArrayParserException;
-import org.valgog.utils.ComplexTypeException;
 import org.valgog.utils.PostgresUtils;
 import org.valgog.utils.RowParserException;
-
-import com.sun.corba.se.impl.ior.NewObjectKeyTemplateBase;
-import com.sun.xml.internal.ws.api.model.wsdl.WSDLBoundOperation.ANONYMOUS;
 
 /**
  * This class defines a database row mapper to be able to map hierarchy of classes with properties with defined setters, 
@@ -169,7 +162,7 @@ public class AnnotatedRowMapper<ITEM>
 		final private int fieldIndex;
 		final private EnumSet<MappingOption> options;
 		
-		public MappingDescriptor(Field classField, Method classFieldSetter, DataType databaseFieldType, String databaseFieldName, int databaseFieldIndex, Set<MappingOption> options, Class genricClass, int fieldIndex) {
+		public MappingDescriptor(Field classField, Method classFieldSetter, DataType databaseFieldType, String databaseFieldName, int databaseFieldIndex, Set<MappingOption> options, int fieldIndex) {
 			this.classField = classField;
 			this.classFieldSetter = classFieldSetter;
 			this.databaseFieldType = databaseFieldType;
@@ -177,7 +170,12 @@ public class AnnotatedRowMapper<ITEM>
 			this.databaseFieldIndex = databaseFieldIndex;
 			this.options = EnumSet.copyOf(options);
 			this.fieldIndex = fieldIndex;
-			this.genricClass =  genricClass;
+			if (classField.getGenericType() instanceof ParameterizedType) {
+				Type[] genericTypes = ((ParameterizedType) classField.getGenericType()).getActualTypeArguments();
+				this.genricClass =  (Class) genericTypes[0];
+			} else {
+				this.genricClass = null;
+			}
 		}
 		
 		public Field getClassField() {
@@ -362,14 +360,6 @@ public class AnnotatedRowMapper<ITEM>
 			if ( field.isAnnotationPresent(Optional.class) ) {
 				mappingOptions.add(MappingOption.OPTIONAL);
 			}
-			GenericParameters genricParamenters = field.getAnnotation(GenericParameters.class);
-			Class genericClass = null;
-			if (genricParamenters != null) {
-				Class[] genericClasses = genricParamenters.value();
-				if (genericClasses != null && genericClasses.length==1) {
-					genericClass = genericClasses[0];
-				}
-			}
 			DataType databaseFieldType = annotation.type();
 			String databaseFieldName = annotation.name();
 			final int fieldIndex = annotation.position();
@@ -397,7 +387,6 @@ public class AnnotatedRowMapper<ITEM>
 					databaseFieldName, 
 					databaseFieldIndex,
 					mappingOptions,
-					genericClass,
 					fieldIndex);
 			if ( logger.isLoggable(Level.FINE) ) {
 				logger.fine("Property " + fieldName + " will be filled with the value of the database field [" + String.valueOf( databaseFieldName ) + "] "); 
@@ -725,7 +714,7 @@ public class AnnotatedRowMapper<ITEM>
 		} catch (Exception e) {
 			logger.info("Result is not a class");
 		} 
-		if (expectedType.isAssignableFrom(ArrayList.class)) {
+		if (expectedType.isAssignableFrom(List.class)) {
 			List result = new ArrayList();
 			List<String> values = null;
 			values = PostgresUtils.getArrayElements(value);

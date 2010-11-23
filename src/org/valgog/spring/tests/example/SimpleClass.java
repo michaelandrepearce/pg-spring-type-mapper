@@ -2,10 +2,9 @@ package org.valgog.spring.tests.example;
 
 import java.util.List;
 
+import org.valgog.spring.annotations.AllowPrimitiveDefaults;
 import org.valgog.spring.annotations.DataType;
 import org.valgog.spring.annotations.DatabaseField;
-import org.valgog.spring.annotations.AllowPrimitiveDefaults;
-import org.valgog.spring.annotations.GenericParameters;
 import org.valgog.spring.annotations.Optional;
 
 public class SimpleClass {
@@ -28,7 +27,6 @@ public class SimpleClass {
 	
 	@DatabaseField
 	@Optional
-	@GenericParameters(String.class)
 	public List<String> genericTags;
 
 	/*

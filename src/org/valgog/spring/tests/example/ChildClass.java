@@ -3,7 +3,6 @@ package org.valgog.spring.tests.example;
 import java.util.List;
 
 import org.valgog.spring.annotations.DatabaseField;
-import org.valgog.spring.annotations.GenericParameters;
 
 public class ChildClass {
 	
@@ -14,7 +13,6 @@ public class ChildClass {
 	private ChildChildClass child;
 	
 	@DatabaseField(name = "children", position=2)
-	@GenericParameters(ChildChildClass.class)
 	private List<ChildChildClass> children;	
 
 	public Integer getId() {
