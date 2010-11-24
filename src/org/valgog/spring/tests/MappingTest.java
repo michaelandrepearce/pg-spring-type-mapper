@@ -18,10 +18,12 @@ import org.apache.log4j.Logger;
 import org.junit.Before;
 import org.junit.Test;
 import org.valgog.spring.AnnotatedRowMapper;
+import org.valgog.spring.tests.example.ComplexEmbed;
 import org.valgog.spring.tests.example.ParentClass;
 import org.valgog.spring.tests.example.SimpleClass;
 import org.valgog.spring.tests.example.ExtendedClass;
 import org.valgog.spring.tests.example.SimpleRowClass;
+import org.valgog.spring.tests.example.WithEmbed;
 
 public class MappingTest {
 	
@@ -70,7 +72,17 @@ public class MappingTest {
 			"  id integer,\n" +
 			"  child test.child_child_type,\n" +
 			"  children test.child_child_type[]\n" +
+			"); \n" +			
+			"CREATE TYPE test.with_embed AS ( \n" +
+			"  x integer,\n" +
+			"  y integer\n" +
+			"); \n" +
+			"CREATE TYPE test.complex_embed AS ( \n" +
+			"  x integer,\n" +
+			"  embed test.with_embed\n" +
 			"); \n" ;
+;
+;
 		s.execute(SQL);
 		conn.commit();
 	}
@@ -181,5 +193,35 @@ public class MappingTest {
 		}
 	}		
 
+	@Test()
+	public void testEmbedWithName() throws SQLException {
+		
+		PreparedStatement ps = conn.prepareStatement("SELECT ROW(1, 2)::test.with_embed");
+		ResultSet rs = ps.executeQuery();
+		AnnotatedRowMapper<WithEmbed> mapper = AnnotatedRowMapper.getMapperForClass(WithEmbed.class);
+		int i = 0;
+		while( rs.next() ) {
+			WithEmbed result = mapper.mapRow(rs, i++);
+			assertNotNull(result.getEmbed());
+			assertThat(1, is(result.getEmbed().getX()));
+			assertThat(2, is(result.getEmbed().getY()));
+		}
+	}
+	
+	@Test()
+	public void testComplexEmbed() throws SQLException {
+		
+		PreparedStatement ps = conn.prepareStatement("SELECT 1 as x, ROW(1,2)::test.with_embed  as embed");
+		ResultSet rs = ps.executeQuery();
+		AnnotatedRowMapper<ComplexEmbed> mapper = AnnotatedRowMapper.getMapperForClass(ComplexEmbed.class);
+		int i = 0;
+		while( rs.next() ) {
+			ComplexEmbed result = mapper.mapRow(rs, i++);
+			assertNotNull(result.getWithEmbed());
+			assertThat(1, is(result.getWithEmbed().getEmbed().getX()));
+			assertThat(2, is(result.getWithEmbed().getEmbed().getY()));
+		}
+	}		
+	
 
 }

@@ -32,6 +32,7 @@ import org.valgog.spring.annotations.AllowPrimitiveDefaults;
 import org.valgog.spring.annotations.DataType;
 import org.valgog.spring.annotations.DatabaseField;
 import org.valgog.spring.annotations.DatabaseFieldNamePrefix;
+import org.valgog.spring.annotations.Embed;
 import org.valgog.spring.annotations.Optional;
 import org.valgog.utils.ArrayParserException;
 import org.valgog.utils.PostgresUtils;
@@ -162,9 +163,10 @@ public class AnnotatedRowMapper<ITEM>
 		final private int databaseFieldIndex;
 		final private Class genricClass;
 		final private int fieldIndex;
+		final private boolean embed;
 		final private EnumSet<MappingOption> options;
 		
-		public MappingDescriptor(Field classField, Method classFieldSetter, DataType databaseFieldType, String databaseFieldName, int databaseFieldIndex, Set<MappingOption> options, int fieldIndex) {
+		public MappingDescriptor(Field classField, Method classFieldSetter, DataType databaseFieldType, String databaseFieldName, int databaseFieldIndex, Set<MappingOption> options, int fieldIndex, boolean embed) {
 			this.classField = classField;
 			this.classFieldSetter = classFieldSetter;
 			this.databaseFieldType = databaseFieldType;
@@ -172,6 +174,7 @@ public class AnnotatedRowMapper<ITEM>
 			this.databaseFieldIndex = databaseFieldIndex;
 			this.options = EnumSet.copyOf(options);
 			this.fieldIndex = fieldIndex;
+			this.embed = embed;
 			if (classField.getGenericType() instanceof ParameterizedType) {
 				Type[] genericTypes = ((ParameterizedType) classField.getGenericType()).getActualTypeArguments();
 				this.genricClass =  (Class) genericTypes[0];
@@ -215,6 +218,14 @@ public class AnnotatedRowMapper<ITEM>
 		public int getFieldIndex() {
 			return fieldIndex;
 		}
+
+		public boolean isEmbed() {
+			return embed;
+		}
+
+		public Class getEmbedClass() {
+			return classField.getType();
+		}
 		
 	}
 	
@@ -234,6 +245,7 @@ public class AnnotatedRowMapper<ITEM>
 	 * @see AllowPrimitiveDefaults
 	 * @see DataType
 	 */
+	 @SuppressWarnings("unchecked")
 	static final <ItemTYPE> void extractAnnotatedFieldValues(Class<ItemTYPE> itemClass, ResultSet rs, ItemTYPE item) throws SQLException {
 		if ( itemClass == null ) throw new NullPointerException("itemClass should be not null");
 		if ( item == null ) throw new NullPointerException("item should be not null");
@@ -250,25 +262,37 @@ public class AnnotatedRowMapper<ITEM>
 			final DataType dataType = desc.getDatabaseFieldType();
 			final String fieldName = desc.getDatabaseFieldName();
 			try {
-				int fieldIndex = -1;
-				try {
-					fieldIndex = rs.findColumn(fieldName);
-				} catch( SQLException e) {
-					if ( desc.is(MappingOption.OPTIONAL) ) {
-						continue; // skip the optional field if not found in the result set
-					} else {
-						throw e;
+				if (!desc.isEmbed()) {
+					int fieldIndex = -1;
+					try {
+						fieldIndex = rs.findColumn(fieldName);
+					} catch( SQLException e) {
+						if ( desc.is(MappingOption.OPTIONAL) ) {
+							continue; // skip the optional field if not found in the result set
+						} else {
+							throw e;
+						}
 					}
-				}
-				
-				Object rawValue = dataType.extractFieldValueRaw(rs, fieldIndex);
-				
-				Object value = makeAssignable(connection, expectedType, rawValue, desc.is(MappingOption.ALLOW_PRIMITIVE_DEFAULTS), desc.getGenricClass());
-				
-				if ( classFieldSetter != null ) {
-					classFieldSetter.invoke(item, value);
+					
+					Object rawValue = dataType.extractFieldValueRaw(rs, fieldIndex);
+					
+					Object value = makeAssignable(connection, expectedType, rawValue, desc.is(MappingOption.ALLOW_PRIMITIVE_DEFAULTS), desc.getGenricClass());
+					
+					if ( classFieldSetter != null ) {
+						classFieldSetter.invoke(item, value);
+					} else {
+						classField.set(item, value);
+					}
 				} else {
-					classField.set(item, value);
+					//Object value = desc.getEmbedClass().newInstance();
+					Object rawValue = dataType.extractFieldValueRaw(rs, 1);
+					Object value = makeAssignable(connection, expectedType, rawValue, desc.is(MappingOption.ALLOW_PRIMITIVE_DEFAULTS), desc.getGenricClass());
+					//extractAnnotatedFieldValues(desc.getEmbedClass(), rs, value);
+					if ( classFieldSetter != null ) {
+						classFieldSetter.invoke(item, value);
+					} else {
+						classField.set(item, value);
+					}						
 				}
 			} catch (IllegalAccessException e) {
 				throw new SQLException( String.format("Could not find a corresponding setter for private field [%s]", classField.toString() ), e );
@@ -354,44 +378,59 @@ public class AnnotatedRowMapper<ITEM>
 			}
 			EnumSet<MappingOption> mappingOptions = EnumSet.noneOf(MappingOption.class);
 			DatabaseField annotation = field.getAnnotation(DatabaseField.class);
+			Embed embedAnnotation = field.getAnnotation(Embed.class);
 			
-			if ( annotation == null ) continue;
-			if ( field.isAnnotationPresent(AllowPrimitiveDefaults.class) ) {
-				mappingOptions.add(MappingOption.ALLOW_PRIMITIVE_DEFAULTS);
-			}
-			if ( field.isAnnotationPresent(Optional.class) ) {
-				mappingOptions.add(MappingOption.OPTIONAL);
-			}
-			DataType databaseFieldType = annotation.type();
-			String databaseFieldName = annotation.name();
-			final int fieldIndex = annotation.position();
-			if ( databaseFieldName == null || databaseFieldName.length() == 0 ) {
-				// generate name from the class field name
-				databaseFieldName = rewriteJavaPropertyNameToLowercaseUnderscoreName(fieldName);
-				DatabaseFieldNamePrefix prefixAnnotation = field.getAnnotation(DatabaseFieldNamePrefix.class);
-				if ( prefixAnnotation != null ) {
-					String prefix = prefixAnnotation.value();
-					if ( prefix != null && prefix.length() > 0 ) {
-						databaseFieldName = prefix + databaseFieldName;
-					}
-				} else {
-					// prefix annotation is not defined for that field, check if the global prefix annotation is defined
-					if ( globalPrefix != null && globalPrefix.length() > 0 ) {
-						databaseFieldName = globalPrefix + databaseFieldName;
+			if ( annotation == null && embedAnnotation == null) continue;
+			MappingDescriptor desc = null;
+			if (embedAnnotation != null) {
+				desc = new MappingDescriptor(
+						field, 
+						setter,
+						DataType.AUTOMATIC, 
+						null, 
+						databaseFieldIndex,
+						mappingOptions,
+						0, 
+						true);
+			} else {
+				if ( field.isAnnotationPresent(AllowPrimitiveDefaults.class) ) {
+					mappingOptions.add(MappingOption.ALLOW_PRIMITIVE_DEFAULTS);
+				}
+				if ( field.isAnnotationPresent(Optional.class) ) {
+					mappingOptions.add(MappingOption.OPTIONAL);
+				}
+				DataType databaseFieldType = annotation.type();
+				String databaseFieldName = annotation.name();
+				final int fieldIndex = annotation.position();
+				if ( databaseFieldName == null || databaseFieldName.length() == 0 ) {
+					// generate name from the class field name
+					databaseFieldName = rewriteJavaPropertyNameToLowercaseUnderscoreName(fieldName);
+					DatabaseFieldNamePrefix prefixAnnotation = field.getAnnotation(DatabaseFieldNamePrefix.class);
+					if ( prefixAnnotation != null ) {
+						String prefix = prefixAnnotation.value();
+						if ( prefix != null && prefix.length() > 0 ) {
+							databaseFieldName = prefix + databaseFieldName;
+						}
+					} else {
+						// prefix annotation is not defined for that field, check if the global prefix annotation is defined
+						if ( globalPrefix != null && globalPrefix.length() > 0 ) {
+							databaseFieldName = globalPrefix + databaseFieldName;
+						}
 					}
 				}
-			}
-			databaseFieldIndex += 1;
-			MappingDescriptor desc = new MappingDescriptor(
-					field, 
-					setter,
-					databaseFieldType, 
-					databaseFieldName, 
-					databaseFieldIndex,
-					mappingOptions,
-					fieldIndex);
-			if ( logger.isLoggable(Level.FINE) ) {
-				logger.fine("Property " + fieldName + " will be filled with the value of the database field [" + String.valueOf( databaseFieldName ) + "] "); 
+				databaseFieldIndex += 1;
+				desc = new MappingDescriptor(
+						field, 
+						setter,
+						databaseFieldType, 
+						databaseFieldName, 
+						databaseFieldIndex,
+						mappingOptions,
+						fieldIndex, 
+						false);
+				if ( logger.isLoggable(Level.FINE) ) {
+					logger.fine("Property " + fieldName + " will be filled with the value of the database field [" + String.valueOf( databaseFieldName ) + "] "); 
+				}
 			}
 			descList.add(desc);
 		}
@@ -543,7 +582,12 @@ public class AnnotatedRowMapper<ITEM>
 						throw e;
 					}
 					if (elementValue == null) continue; // skip nulls
-					Object element = makeAssignableFromString(expectedFieldType, elementValue, null);
+					Object element;
+					if (!desc.isEmbed()) {
+						element = makeAssignableFromString(expectedFieldType, elementValue, null);
+					} else {
+						element = makeAssignableFromString(expectedFieldType, objectValue, null);
+					}
 					Method setter = desc.getClassFieldSetter();
 					if (setter == null) {
 						desc.getClassField().set(newObject, element);
