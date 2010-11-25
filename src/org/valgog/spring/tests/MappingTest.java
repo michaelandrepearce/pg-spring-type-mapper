@@ -85,7 +85,7 @@ public class MappingTest {
 ;
 ;
 		s.execute(SQL);
-		conn.commit();
+		//conn.commit();
 	}
 	
 	
