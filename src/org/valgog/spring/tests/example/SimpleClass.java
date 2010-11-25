@@ -9,23 +9,23 @@ import org.valgog.spring.annotations.Optional;
 
 public class SimpleClass {
 	
-	@DatabaseField(name = "id")
+	@DatabaseField(name = "id", position=0)
 	private Integer id;
 
-	@DatabaseField(name = "name")
+	@DatabaseField(name = "name", position=1)
 	private String name;
 
-	@DatabaseField(name = "country_code", type=DataType.COMMON_TEXT)
+	@DatabaseField(name = "country_code", type=DataType.COMMON_TEXT, position=2)
 	private String countryCode;
 
-	@DatabaseField @AllowPrimitiveDefaults
+	@DatabaseField(position=3) @AllowPrimitiveDefaults
 	private int[] lastMarks;
 
-	@DatabaseField(name = "tags")
+	@DatabaseField(name = "tags", position=4)
 	@Optional
 	private String[] tags;
 	
-	@DatabaseField
+	@DatabaseField(position=5)
 	@Optional
 	public List<String> genericTags;
 

@@ -284,15 +284,18 @@ public class AnnotatedRowMapper<ITEM>
 						classField.set(item, value);
 					}
 				} else {
-					//Object value = desc.getEmbedClass().newInstance();
-					Object rawValue = dataType.extractFieldValueRaw(rs, 1);
-					Object value = makeAssignable(connection, expectedType, rawValue, desc.is(MappingOption.ALLOW_PRIMITIVE_DEFAULTS), desc.getGenricClass());
-					//extractAnnotatedFieldValues(desc.getEmbedClass(), rs, value);
-					if ( classFieldSetter != null ) {
-						classFieldSetter.invoke(item, value);
-					} else {
-						classField.set(item, value);
-					}						
+					try {
+						Object obj = desc.getEmbedClass().newInstance();
+						extractAnnotatedFieldValues(desc.getEmbedClass(), rs, obj);
+						if ( classFieldSetter != null ) {
+							classFieldSetter.invoke(item, obj);
+						} else {
+							classField.set(item, obj);
+						}
+					} catch (InstantiationException e) {
+						continue;
+					}
+					
 				}
 			} catch (IllegalAccessException e) {
 				throw new SQLException( String.format("Could not find a corresponding setter for private field [%s]", classField.toString() ), e );
@@ -576,7 +579,7 @@ public class AnnotatedRowMapper<ITEM>
 					final Class<?> expectedFieldType = desc.getClassFieldType();
 					final String elementValue;
 					try {
-						elementValue = elementList.get(i);
+						elementValue = elementList.get(desc.getFieldIndex());
 					} catch (IndexOutOfBoundsException e) {
 						if (desc.is(MappingOption.OPTIONAL)) continue;
 						throw e;
