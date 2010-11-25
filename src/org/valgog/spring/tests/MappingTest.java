@@ -75,7 +75,8 @@ public class MappingTest {
 			"); \n" +			
 			"CREATE TYPE test.with_embed AS ( \n" +
 			"  x integer,\n" +
-			"  y integer\n" +
+			"  y integer,\n" +
+			"  z integer\n" +
 			"); \n" +
 			"CREATE TYPE test.complex_embed AS ( \n" +
 			"  x integer,\n" +
@@ -192,11 +193,11 @@ public class MappingTest {
 			assertThat(1, is(row.getChildren().get(2).getChildren().get(0).getId()));
 		}
 	}		
-
+	
 	@Test()
-	public void testEmbedWithName() throws SQLException {
+	public void testEmbedWithNameNoRow() throws SQLException {
 		
-		PreparedStatement ps = conn.prepareStatement("SELECT ROW(1, 2)::test.with_embed");
+		PreparedStatement ps = conn.prepareStatement("SELECT 1 as x, 2 as y, 3 as z");
 		ResultSet rs = ps.executeQuery();
 		AnnotatedRowMapper<WithEmbed> mapper = AnnotatedRowMapper.getMapperForClass(WithEmbed.class);
 		int i = 0;
@@ -205,13 +206,15 @@ public class MappingTest {
 			assertNotNull(result.getEmbed());
 			assertThat(1, is(result.getEmbed().getX()));
 			assertThat(2, is(result.getEmbed().getY()));
+			assertThat(3, is(result.getZ()));
 		}
 	}
+	
 	
 	@Test()
 	public void testComplexEmbed() throws SQLException {
 		
-		PreparedStatement ps = conn.prepareStatement("SELECT 1 as x, ROW(1,2)::test.with_embed  as embed");
+		PreparedStatement ps = conn.prepareStatement("SELECT 1 as x, ROW(1,2,3)::test.with_embed  as embed");
 		ResultSet rs = ps.executeQuery();
 		AnnotatedRowMapper<ComplexEmbed> mapper = AnnotatedRowMapper.getMapperForClass(ComplexEmbed.class);
 		int i = 0;
@@ -220,6 +223,7 @@ public class MappingTest {
 			assertNotNull(result.getWithEmbed());
 			assertThat(1, is(result.getWithEmbed().getEmbed().getX()));
 			assertThat(2, is(result.getWithEmbed().getEmbed().getY()));
+			assertThat(3, is(result.getWithEmbed().getZ()));
 		}
 	}		
 	
