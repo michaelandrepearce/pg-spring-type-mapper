@@ -4,10 +4,10 @@ import org.valgog.spring.annotations.DatabaseField;
 
 public class EmbededObject {
 	
-	@DatabaseField(name="x", position=0)
+	@DatabaseField(name="x")
 	private int x;
 	
-	@DatabaseField(name="y", position=1)
+	@DatabaseField(name="y")
 	private int y;
 
 	public int getX() {

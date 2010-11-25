@@ -4,7 +4,7 @@ import org.valgog.spring.annotations.DatabaseField;
 
 public class ChildChildClass {
 	
-	@DatabaseField(name = "id", position=0)
+	@DatabaseField(name = "id")
 	private Integer id;
 
 	public Integer getId() {

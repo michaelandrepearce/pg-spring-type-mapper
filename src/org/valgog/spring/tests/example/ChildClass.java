@@ -6,13 +6,13 @@ import org.valgog.spring.annotations.DatabaseField;
 
 public class ChildClass {
 	
-	@DatabaseField(name = "id", position=0)
+	@DatabaseField(name = "id")
 	private Integer id;
 	
-	@DatabaseField(name = "child", position=1)
+	@DatabaseField(name = "child")
 	private ChildChildClass child;
 	
-	@DatabaseField(name = "children", position=2)
+	@DatabaseField(name = "children")
 	private List<ChildChildClass> children;	
 
 	public Integer getId() {
