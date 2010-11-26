@@ -343,15 +343,17 @@ public class AnnotatedRowMapper<ITEM>
 	 * @param itemClass source item class
 	 * @param descList List of {@link MappingDesriptor} objects to filled with field mappings
 	 */
-	static final private <ItemTYPE> int extractMappingDescriptorsForClass(Class<ItemTYPE> itemClass, List<MappingDescriptor<?>> descList) {
+	static final private <ItemTYPE> void extractMappingDescriptorsForClass(Class<ItemTYPE> itemClass, List<MappingDescriptor<?>> descList) {
 		
 		if ( itemClass == null || Object.class.equals(itemClass) ) { 
-			return 0;
+			return;
 		}
-		
 		// fill mapping descriptors for class super classes
 		Class<? super ItemTYPE> itemSuperClass = itemClass.getSuperclass();
-		int databaseFieldIndex = extractMappingDescriptorsForClass(itemSuperClass, descList);
+		extractMappingDescriptorsForClass(itemSuperClass, descList);
+
+		// get the last loaded position (we use the size of already processed fields)
+		int databaseFieldIndex = descList.size();
 		
 		Field[] itemFields = itemClass.getDeclaredFields();
 		for (int i = 0, l = itemFields.length ; i < l ; i++ ) {
@@ -376,13 +378,14 @@ public class AnnotatedRowMapper<ITEM>
 			MappingDescriptor<?> desc = null;
 			// start checking annotations
 			if ( field.isAnnotationPresent(Embed.class) ) {
+			    //// mappingOptions.add(MappingOption.EMBED);
+			    if ( logger.isLoggable(Level.FINE) ) {
+			        logger.fine("Embedding property " + itemClass.getName() + '.' + fieldName); 
+			    }
 				// we saw a field, that is supposed to be completely embedded into the current mapping
-				//// mappingOptions.add(MappingOption.EMBED);
-				// process it
-				if ( logger.isLoggable(Level.FINE) ) {
-					logger.fine("Embedding property " + itemClass.getName() + '.' + fieldName); 
-				}
-				databaseFieldIndex += extractMappingDescriptorsForClass(field.getType(), descList);
+				// process it on the same level
+			    // TODO: Level of the embedding should be also stored
+				extractMappingDescriptorsForClass(field.getType(), descList);
 				// continue with the next field
 				continue;
 			}
@@ -429,7 +432,6 @@ public class AnnotatedRowMapper<ITEM>
 			}
 			descList.add(desc);
 		}
-		return databaseFieldIndex;
 	}
 	
 	private static final String capitalize(String name) {
