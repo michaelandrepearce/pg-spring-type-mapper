@@ -677,20 +677,37 @@ public class AnnotatedRowMapper<ITEM>
 				final DataType dataType = desc.getDatabaseFieldType();
 				int fieldIndex = desc.getFieldIndex();
 				String stringValue = null;
-				if (fieldIndex != -1) {
+				if (desc.isEmbed()) {
+					Object embed;
 					try {
-					stringValue = fieldValueList.get(fieldIndex);
-					} catch (IndexOutOfBoundsException e) {
-						logger.warning("Could not map " + genricType + " field " + classField);
+						embed = desc.getEmbedClass().newInstance();
+						fillChildObject(embed, desc.getEmbedClass(), string);
+						if (classFieldSetter == null) {
+							desc.getClassField().set(current, embed);
+						} else {
+							classFieldSetter.invoke(current, embed);
+						}
+					} catch (InstantiationException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
 					}
-				}
-				Object element;
-				element = makeAssignableFromString(expectedChildType, stringValue, desc.getGenricClass());
-				
-				if (classFieldSetter == null) {
-					desc.getClassField().set(current, element);
 				} else {
-					classFieldSetter.invoke(current, element);
+					if (fieldIndex != -1) {
+						try {
+						stringValue = fieldValueList.get(fieldIndex);
+						} catch (IndexOutOfBoundsException e) {
+							logger.warning("Could not map " + genricType + " field " + classField);
+						}
+					}
+					Object element;
+					element = makeAssignableFromString(expectedChildType, stringValue, desc.getGenricClass());
+					
+					if (classFieldSetter == null) {
+						desc.getClassField().set(current, element);
+					} else {
+						classFieldSetter.invoke(current, element);
+					}
+
 				}
 			} catch (SQLException e) {
 				// TODO Auto-generated catch block

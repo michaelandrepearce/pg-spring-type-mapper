@@ -16,9 +16,11 @@ import java.util.Properties;
 
 import org.apache.log4j.Logger;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.valgog.spring.AnnotatedRowMapper;
 import org.valgog.spring.tests.example.ComplexEmbed;
+import org.valgog.spring.tests.example.ListWithEmbed;
 import org.valgog.spring.tests.example.ParentClass;
 import org.valgog.spring.tests.example.SimpleClass;
 import org.valgog.spring.tests.example.ExtendedClass;
@@ -224,6 +226,26 @@ public class MappingTest {
 			assertThat(1, is(result.getWithEmbed().getEmbed().getX()));
 			assertThat(2, is(result.getWithEmbed().getEmbed().getY()));
 			assertThat(3, is(result.getWithEmbed().getZ()));
+		}
+	}		
+	
+	@Test()
+	public void testComplexArrayEmbed() throws SQLException {
+		
+		PreparedStatement ps = conn.prepareStatement("SELECT ARRAY[ROW(1,2,3)::test.with_embed, ROW(1,2,3)::test.with_embed]::test.with_embed[]  as embeds");
+		ResultSet rs = ps.executeQuery();
+		AnnotatedRowMapper<ListWithEmbed> mapper = AnnotatedRowMapper.getMapperForClass(ListWithEmbed.class);
+		int i = 0;
+		while( rs.next() ) {
+			ListWithEmbed result = mapper.mapRow(rs, i++);
+			assertNotNull(result.getList().get(0));
+			assertThat(1, is(result.getList().get(0).getEmbed().getX()));
+			assertThat(2, is(result.getList().get(0).getEmbed().getY()));
+			assertThat(3, is(result.getList().get(0).getZ()));
+			assertThat(1, is(result.getList().get(1).getEmbed().getX()));
+			assertThat(2, is(result.getList().get(1).getEmbed().getY()));
+			assertThat(3, is(result.getList().get(1).getZ()));
+			
 		}
 	}		
 	
