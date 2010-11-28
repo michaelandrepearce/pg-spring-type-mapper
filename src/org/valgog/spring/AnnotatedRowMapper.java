@@ -4,6 +4,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.sql.Array;
@@ -33,6 +34,7 @@ import org.valgog.spring.annotations.DatabaseField;
 import org.valgog.spring.annotations.DatabaseFieldNamePrefix;
 import org.valgog.spring.annotations.Embed;
 import org.valgog.spring.annotations.Optional;
+import org.valgog.spring.helpers.exceptions.FieldDescriptionException;
 import org.valgog.utils.ArrayParserException;
 import org.valgog.utils.PostgresUtils;
 import org.valgog.utils.RowParserException;
@@ -102,7 +104,7 @@ public class AnnotatedRowMapper<ITEM>
 	 * @see ResultSet
 	 */
 	protected void fillItem(ResultSet rs, ITEM item) throws SQLException {
-		extractAnnotatedFieldValues(this.itemType, rs, item);
+		extractAnnotatedFieldValuesFromResultSet(this.itemType, item, rs);
 	}
 	
 	
@@ -146,7 +148,7 @@ public class AnnotatedRowMapper<ITEM>
 	private static final Lock cacheReadLock = mappingDescriptorCacheLock.readLock();
 	private static final Lock cacheWriteLock = mappingDescriptorCacheLock.writeLock();
 	
-	private static final Map<Class<?>, List<MappingDescriptor<?>>> mappingDescriptorCache = new HashMap<Class<?>, List<MappingDescriptor<?>>>();
+	private static final Map<Class<?>, List<? extends ClassFieldDescriptor<?, ?>>> mappingDescriptorCache = new HashMap<Class<?>, List<? extends ClassFieldDescriptor<?, ?>>>();
 	
 	private static class TypeDescriptor<T> {
 		final private Class<T> type;
@@ -184,35 +186,69 @@ public class AnnotatedRowMapper<ITEM>
 		}
 	}
 	
+	private static class ClassFieldDescriptor<C, T> extends TypeDescriptor<T> {
+		
+		final private Field classField;
+		final private Method classFieldSetter;
+		
+		public ClassFieldDescriptor(Field sourceField) throws FieldDescriptionException {
+			super(sourceField);
+			this.classField = sourceField;
+			// find the setter 
+			final String fieldName = sourceField.getName();
+			final Class<?> fieldType = sourceField.getType();
+			final Class<?> declaringClass = sourceField.getDeclaringClass();
+			Method setter = null;
+			try {
+				final String setterName = "set" + capitalize( fieldName );
+				setter = declaringClass.getDeclaredMethod(setterName, fieldType );
+			} catch (SecurityException securityException) {
+				throw new FieldDescriptionException( "Setter for the field " + declaringClass.getName() + '.' + fieldName + " could not be extracted: " + securityException.getMessage() );
+			} catch (NoSuchMethodException e) {
+				if ( ! Modifier.isPublic( classField.getModifiers() ) ) {
+					throw new FieldDescriptionException("Setter for non-public field " + declaringClass.getName() + '.' + fieldName + " could not be found");
+				}
+			}
+			this.classFieldSetter = setter;
+		}
+		
+		public void assignFieldValue(C objectInstance, T fieldValue) throws FieldDescriptionException {
+			try {
+				if ( this.classFieldSetter != null ) {
+					this.classFieldSetter.invoke(objectInstance, fieldValue);
+				} else {
+					this.classField.set(objectInstance, fieldValue);
+				}
+			} catch (IllegalArgumentException e) {
+				throw new FieldDescriptionException(e);
+			} catch (IllegalAccessException e) {
+				throw new FieldDescriptionException(e);
+			} catch (InvocationTargetException e) {
+				throw new FieldDescriptionException(e);
+			}
+		}
+		
+	}
+	
 	/**
 	 * Private class to hold information about mapping of some database column to a class field, used in {@link mappingDescriptorCache} cache.
 	 *
 	 */
-	private static class MappingDescriptor<T> extends TypeDescriptor<T> {
+	private static class DatabaseFieldDescriptor<C, T> extends ClassFieldDescriptor<C, T> {
 
-		final private Field classField;
-		final private Method classFieldSetter;
 		final private DataType databaseFieldType;
 		final private String databaseFieldName;
 		final private int databaseFieldIndex;
 		final private EnumSet<MappingOption> options;
 		
-		public MappingDescriptor(Field classField, Method classFieldSetter, DataType databaseFieldType, String databaseFieldName, int databaseFieldIndex, Set<MappingOption> options) {
+		public DatabaseFieldDescriptor(Field classField, DataType databaseFieldType, String databaseFieldName, int databaseFieldIndex, Set<MappingOption> options) throws FieldDescriptionException {
 			super(classField);
-			this.classField = classField;
-			this.classFieldSetter = classFieldSetter;
 			this.databaseFieldType = databaseFieldType;
 			this.databaseFieldName = databaseFieldName;
 			this.databaseFieldIndex = databaseFieldIndex;
 			this.options = EnumSet.copyOf(options);
 		}
-		
-		public Field getClassField() {
-			return classField;
-		}
-		public Method getClassFieldSetter() {
-			return classFieldSetter;
-		}
+
 		public DataType getDatabaseFieldType(){
 			return databaseFieldType;
 		}
@@ -229,7 +265,7 @@ public class AnnotatedRowMapper<ITEM>
 	}
 	
 	private static enum MappingOption {
-		OPTIONAL, ALLOW_PRIMITIVE_DEFAULTS, EMBED;
+		OPTIONAL, ALLOW_PRIMITIVE_DEFAULTS;
 	}
 
 	/**
@@ -244,76 +280,113 @@ public class AnnotatedRowMapper<ITEM>
 	 * @see AllowPrimitiveDefaults
 	 * @see DataType
 	 */
-	static final <ItemTYPE> void extractAnnotatedFieldValues(Class<ItemTYPE> itemClass, ResultSet rs, ItemTYPE item) throws SQLException {
+	static final <ItemTYPE> void extractAnnotatedFieldValuesFromResultSet(Class<ItemTYPE> itemClass, ItemTYPE item, ResultSet rs) throws SQLException {
 		if ( itemClass == null ) throw new NullPointerException("itemClass should be not null");
 		if ( item == null ) throw new NullPointerException("item should be not null");
 		if ( rs == null ) throw new NullPointerException("rs should be not null");
 
 		// get cached structure
-		final List<MappingDescriptor<?>> descList = getFieldMappingDescriptorList(itemClass);
+		final List<? extends ClassFieldDescriptor<ItemTYPE, Object>> descList = getFieldMappingDescriptorList(itemClass);
 		final Connection connection = rs.getStatement().getConnection();
 		// use the cache
-		for( MappingDescriptor<?> desc : descList ) {
-			final Field classField = desc.getClassField();
-			final Method classFieldSetter = desc.getClassFieldSetter();
-			final DataType dataType = desc.getDatabaseFieldType();
-			final String fieldName = desc.getDatabaseFieldName();
-			try {
-				// if ( ! desc.is(MappingOption.EMBED)) {
-				int fieldIndex = -1;
+		for( ClassFieldDescriptor<ItemTYPE, Object> desc : descList ) {
+			Object value;
+			if ( desc instanceof DatabaseFieldDescriptor ) {
+				DatabaseFieldDescriptor<ItemTYPE, Object> dbFieldDesc = (DatabaseFieldDescriptor<ItemTYPE, Object>) desc;
+				final DataType dataType = dbFieldDesc.getDatabaseFieldType();
+				final String fieldName = dbFieldDesc.getDatabaseFieldName();
+				
+				int databaseFieldIndex = -1;
 				try {
-					fieldIndex = rs.findColumn(fieldName);
+					databaseFieldIndex = rs.findColumn(fieldName);
 				} catch( SQLException e) {
-					if ( desc.is(MappingOption.OPTIONAL) ) {
+					if ( dbFieldDesc.is(MappingOption.OPTIONAL) ) {
 						continue; // skip the optional field if not found in the result set
 					} else {
 						throw e;
 					}
 				}
-				
-				Object rawValue = dataType.extractFieldValueRaw(rs, fieldIndex);
-				
-				Object value = makeAssignable(connection, desc, rawValue );
-				
-				if ( classFieldSetter != null ) {
-					classFieldSetter.invoke(item, value);
-				} else {
-					classField.set(item, value);
+				Object rawValue = dataType.extractFieldValueRaw(rs, databaseFieldIndex);
+				value = makeAssignable(connection, dbFieldDesc, rawValue );
+			} else {
+				// if the class field descriptor is not of type DatabaseTypeDescriptor,
+				// we suppose, that it is an embedded field Descriptor
+				// so we get extract fields of this field type 
+				// as if they whare the fields of itemClass
+				try {
+					value = desc.getType().newInstance();
+					extractAnnotatedFieldValuesFromResultSet( (Class<Object>) desc.getType(), value, rs );
+				} catch (InstantiationException e) {
+					logger.log(Level.SEVERE, "Could not instanciate class of type " + desc.getType().getName() + " using default constructor");
+					throw new FieldDescriptionException(e);
+				} catch (IllegalAccessException e) {
+					throw new FieldDescriptionException(e);
 				}
-				/*
-				} else {
-
-					Object rawValue = dataType.extractFieldValueRaw(rs, 1);
-					Object value = makeAssignable(connection, desc, rawValue );
-
-					if ( classFieldSetter != null ) {
-						classFieldSetter.invoke(item, value);
-					} else {
-						classField.set(item, value);
-					}						
-				}
-				*/
-			} catch (IllegalAccessException e) {
-				throw new SQLException( String.format("Could not find a corresponding setter for private field [%s]", classField.toString() ), e );
-			} catch (InvocationTargetException e) {
-				Throwable t = e.getCause();
-				if ( t instanceof SQLException ) throw (SQLException) t;
-				throw new SQLException( e.getCause().getMessage() );
 			}
+			desc.assignFieldValue(item, value);
 		}
 
 	}
+
+	static final <ItemTYPE> void extractAnnotatedFieldValuesFromList(Class<ItemTYPE> itemClass, ItemTYPE item, List<String> stringList) throws SQLException {
+		if ( itemClass == null ) throw new NullPointerException("itemClass should be not null");
+		if ( item == null ) throw new NullPointerException("item should be not null");
+		if ( stringList == null ) throw new NullPointerException("stringList should be not null");
+
+		// get cached structure
+		final List<? extends ClassFieldDescriptor<ItemTYPE, Object>> descList = getFieldMappingDescriptorList(itemClass);
+		// use the cache
+		for( ClassFieldDescriptor<ItemTYPE, Object> desc : descList ) {
+			Object value;
+			if ( desc instanceof DatabaseFieldDescriptor ) {
+				DatabaseFieldDescriptor<ItemTYPE, Object> dbFieldDesc = (DatabaseFieldDescriptor<ItemTYPE, Object>) desc;
+				
+				int databaseFieldIndex = dbFieldDesc.getDatabaseFieldIndex();
+				Object rawValue;
+				try {
+					rawValue = makeAssignableFromString( desc, stringList.get(databaseFieldIndex - 1));
+				} catch (IndexOutOfBoundsException e) {
+					if ( dbFieldDesc.is(MappingOption.OPTIONAL) ) {
+						continue; // skip the optional field if not found in the result set
+					} else {
+						throw e;
+					}
+				}
+				value = makeAssignable(null, dbFieldDesc, rawValue );
+			} else {
+				// if the class field descriptor is not of type DatabaseTypeDescriptor,
+				// we suppose, that it is an embedded field Descriptor
+				// so we get extract fields of this field type 
+				// as if they whare the fields of itemClass
+				try {
+					value = desc.getType().newInstance();
+					extractAnnotatedFieldValuesFromList( (Class<Object>) desc.getType(), value, stringList );
+				} catch (InstantiationException e) {
+					logger.log(Level.SEVERE, "Could not instanciate class of type " + desc.getType().getName() + " using default constructor");
+					throw new FieldDescriptionException(e);
+				} catch (IllegalAccessException e) {
+					throw new FieldDescriptionException(e);
+				}
+			}
+			desc.assignFieldValue(item, value);
+		}
+
+	}
+	
+	
 	
 	/**
 	 * Get a list of filed mapping descriptors for the given class type
 	 * @param <ItemTYPE> Type of the class, that is being introspected
 	 * @param itemClass Class defining the type of the class, that is being introspected
-	 * @return list of {@link MappingDescriptor} objects, defining the given class type
+	 * @return list of {@link DatabaseFieldDescriptor} objects, defining the given class type
+	 * @throws FieldDescriptionException 
 	 */
-	static final private <ItemTYPE> List<MappingDescriptor<?>> getFieldMappingDescriptorList(Class<ItemTYPE> itemClass) {
+	@SuppressWarnings("unchecked")
+	static final private <ItemTYPE> List<ClassFieldDescriptor<ItemTYPE, Object>> getFieldMappingDescriptorList(Class<ItemTYPE> itemClass) throws FieldDescriptionException {
 		cacheReadLock.lock();
 		try {
-			List<MappingDescriptor<?>> descList = mappingDescriptorCache.get(itemClass);
+			List<? extends ClassFieldDescriptor<?, ?>> descList = mappingDescriptorCache.get(itemClass);
 			if ( descList == null ) {
 				cacheReadLock.unlock();
 				cacheWriteLock.lock();
@@ -322,8 +395,8 @@ public class AnnotatedRowMapper<ITEM>
 					descList = mappingDescriptorCache.get(itemClass);
 					if ( descList == null ) { 
 						// fill the cache
-						descList = new ArrayList<MappingDescriptor<?>>();
-						extractMappingDescriptorsForClass(itemClass, descList);
+						descList = new ArrayList<ClassFieldDescriptor<ItemTYPE, ?>>();
+						extractMappingDescriptorsForClass(itemClass, (List<ClassFieldDescriptor<ItemTYPE, ?>>) descList);
 						mappingDescriptorCache.put(itemClass, descList);
 					}
 				} finally {
@@ -331,7 +404,7 @@ public class AnnotatedRowMapper<ITEM>
 					cacheWriteLock.unlock();
 				}
 			}
-			return descList;
+			return (List<ClassFieldDescriptor<ItemTYPE, Object>>) descList;
 		} finally {
 			cacheReadLock.unlock();
 		}
@@ -342,18 +415,16 @@ public class AnnotatedRowMapper<ITEM>
 	 * @param <ItemTYPE> source item class type
 	 * @param itemClass source item class
 	 * @param descList List of {@link MappingDesriptor} objects to filled with field mappings
+	 * @throws FieldDescriptionException 
 	 */
-	static final private <ItemTYPE> void extractMappingDescriptorsForClass(Class<ItemTYPE> itemClass, List<MappingDescriptor<?>> descList) {
+	static final private <ItemTYPE> int extractMappingDescriptorsForClass(Class<? super ItemTYPE> itemClass, List<ClassFieldDescriptor<ItemTYPE, ?>> descList) throws FieldDescriptionException {
 		
 		if ( itemClass == null || Object.class.equals(itemClass) ) { 
-			return;
+			return 0;
 		}
 		// fill mapping descriptors for class super classes
 		Class<? super ItemTYPE> itemSuperClass = itemClass.getSuperclass();
-		extractMappingDescriptorsForClass(itemSuperClass, descList);
-
-		// get the last loaded position (we use the size of already processed fields)
-		int databaseFieldIndex = descList.size();
+		int databaseFieldIndex = extractMappingDescriptorsForClass(itemSuperClass, descList);
 		
 		Field[] itemFields = itemClass.getDeclaredFields();
 		for (int i = 0, l = itemFields.length ; i < l ; i++ ) {
@@ -361,34 +432,21 @@ public class AnnotatedRowMapper<ITEM>
 			final String fieldName = field.getName();
 			
 			if ( field.isSynthetic() ) continue;
-			// find the setter 
-			Method setter;
-			try {
-				final String setterName = "set" + capitalize( fieldName );
-				setter = itemClass.getDeclaredMethod(setterName, field.getType() );
-			} catch (SecurityException securityException) {
-				// skip this filed completely
-				logger.warning("Skipping field " + itemClass.getName() + '.' + fieldName + " as the setter could not be extracted: " + securityException.getMessage() );
-				continue;
-			} catch (NoSuchMethodException e) {
-				setter = null;
-			}
 
-			EnumSet<MappingOption> mappingOptions = EnumSet.noneOf(MappingOption.class);
-			MappingDescriptor<?> desc = null;
 			// start checking annotations
 			if ( field.isAnnotationPresent(Embed.class) ) {
-			    //// mappingOptions.add(MappingOption.EMBED);
-			    if ( logger.isLoggable(Level.FINE) ) {
-			        logger.fine("Embedding property " + itemClass.getName() + '.' + fieldName); 
-			    }
-				// we saw a field, that is supposed to be completely embedded into the current mapping
-				// process it on the same level
-			    // TODO: Level of the embedding should be also stored
-				extractMappingDescriptorsForClass(field.getType(), descList);
-				// continue with the next field
+				if ( logger.isLoggable(Level.FINE) ) {
+					logger.fine("Embedding property " + itemClass.getName() + '.' + fieldName); 
+				}
+				ClassFieldDescriptor<ItemTYPE, ?> desc = new ClassFieldDescriptor<ItemTYPE, Object>(field);
+				descList.add(desc);
+				// to be able to calculate correctly next database field indeces, we have to extract 
+				// mapping descriptors for that embedded type and count processed fields
+				databaseFieldIndex += getFieldMappingDescriptorList(field.getType()).size();
 				continue;
 			}
+			EnumSet<MappingOption> mappingOptions = EnumSet.noneOf(MappingOption.class);
+			DatabaseFieldDescriptor<ItemTYPE, Object> desc = null;
 			DatabaseField annotation = field.getAnnotation(DatabaseField.class);
 			if ( annotation == null ) continue;
 			if ( field.isAnnotationPresent(AllowPrimitiveDefaults.class) ) {
@@ -420,9 +478,8 @@ public class AnnotatedRowMapper<ITEM>
 				}
 			}
 			databaseFieldIndex += 1;
-			desc = new MappingDescriptor<Object>(
+			desc = new DatabaseFieldDescriptor<ItemTYPE, Object>(
 					field, 
-					setter,
 					databaseFieldType, 
 					databaseFieldName, 
 					databaseFieldIndex,
@@ -432,6 +489,7 @@ public class AnnotatedRowMapper<ITEM>
 			}
 			descList.add(desc);
 		}
+		return databaseFieldIndex;
 	}
 	
 	private static final String capitalize(String name) {
@@ -447,7 +505,7 @@ public class AnnotatedRowMapper<ITEM>
 		
 	}
 
-	private static final<T> T makeAssignable(Connection connection, MappingDescriptor<T> typeDesc, Object value) throws SQLException {
+	private static final<C, T> T makeAssignable(Connection connection, DatabaseFieldDescriptor<C, T> typeDesc, Object value) throws SQLException {
 		return makeAssignable(connection, typeDesc, value, typeDesc.is(MappingOption.ALLOW_PRIMITIVE_DEFAULTS));
 	}
 	
@@ -553,39 +611,16 @@ public class AnnotatedRowMapper<ITEM>
 				T newObject = expectedType.newInstance();
 				// split the received ROW string to array of string representations of the field components
 				// and try to assign them to the expected type fields (using filed declaration index)
-				List<MappingDescriptor<?>> descList = getFieldMappingDescriptorList(expectedType);
-				// optimization should be possible here, avoiding to create a temporary String List
 				List<String> elementList = PostgresUtils.postgresROW2StringList(objectValue, 128);
-				for (int i = 0, z = descList.size(); i < z; i++) {
-					final MappingDescriptor<?> desc = descList.get(i);
-					final Class<?> expectedFieldType = desc.getType();
-					final String elementValue;
-					try {
-						elementValue = elementList.get(i);
-					} catch (IndexOutOfBoundsException e) {
-						if (desc.is(MappingOption.OPTIONAL)) continue;
-						throw e;
-					}
-					if (elementValue == null) continue; // skip nulls
-					Object element;
-					//TODO: SUPPORT FOR EMBEDDING TO BE FIXED
-					element = makeAssignableFromString(desc, elementValue);
-					Method setter = desc.getClassFieldSetter();
-					if (setter == null) {
-						desc.getClassField().set(newObject, element);
-					} else {
-						setter.invoke(newObject, element);
-					}
-				}
-				// TODO: add warning if the value is not depleted
+				extractAnnotatedFieldValuesFromList(expectedType, newObject, elementList);
 				return newObject;
 			} catch (RowParserException e) {
 				throw new SQLException("Could not parse provided PGObject value: " + objectValue, e);
 			} catch (InstantiationException e) {
 				throw new SQLException("Could not instansiate object of type " + expectedType.getCanonicalName(), e);
-			} catch (Exception e) {
-				throw new SQLException("Could not convert PGObject value to type " + expectedType.getCanonicalName(), e);
-			}
+			} catch (IllegalAccessException e) {
+				throw new SQLException("Could not instansiate object of type " + expectedType.getCanonicalName(), e);
+			} 
 		}
 		
 		// now try to find a constructor, that will accept the given value (for example Integer(int) )
@@ -599,94 +634,9 @@ public class AnnotatedRowMapper<ITEM>
 				return (T) value.toString();
 			} 
 		} 
-		if (value instanceof Array) {
-			final Collection<Object> result;
-			if ( List.class.isAssignableFrom( expectedType ) ) {
-				result =  new ArrayList<Object>();
-			} else if ( Set.class.isAssignableFrom( expectedType ) ) {
-				result =  new HashSet<Object>();
-			} else {
-				throw new SQLException("Got an array from the database, but the expected type should be a Collection");
-			}
-			if (result != null) {
-				Class<?> genericType = (Class<?>) typeDesc.getActualGenericParameterTypes()[0];
-				if (genericType != null) {
-					Array array = (Array) value;
-					ResultSet set = array.getResultSet();
-					while (set.next()) {
-						Object current;
-						try {
-							current = genericType.newInstance();
-							fillChildObject(current, genericType, set.getString(2));
-							result.add(current);
-						} catch (InstantiationException e) {
-							// TODO Auto-generated catch block
-							e.printStackTrace();
-						} catch (IllegalAccessException e) {
-							// TODO Auto-generated catch block
-							e.printStackTrace();
-						}
-					}
-					
-				}
-				
-				logger.info(value.toString());	
-				return (T) result;
-			}
-			
-		}
 		throw new SQLException( String.format( "Can not map recieved object of type %s to expected type %s", value.getClass().getCanonicalName(), expectedType.getCanonicalName()));
 	}
 	
-	@SuppressWarnings("unchecked")
-	private static void fillChildObject(Object current, Class<?> genericType, String string) {
-		List<MappingDescriptor<?>> descList = getFieldMappingDescriptorList(genericType);
-		List<String> fieldValueList = null;
-		try {
-			fieldValueList = PostgresUtils.postgresROW2StringList(string, 0);
-			logger.info(fieldValueList.toString());
-		} catch (RowParserException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-			return;
-		}
-		
-		for( MappingDescriptor<?> desc : descList ) {
-			try {
-				final Field classField = desc.getClassField();
-				final Method classFieldSetter = desc.getClassFieldSetter();
-				final DataType dataType = desc.getDatabaseFieldType();
-				String stringValue = null;
-
-				try {
-				stringValue = fieldValueList.get(desc.getDatabaseFieldIndex() - 1);
-				} catch (IndexOutOfBoundsException e) {
-					logger.warning("Could not map " + genericType + " field " + classField);
-				}
-				Object element;
-				element = makeAssignableFromString(desc, stringValue);
-				
-				if (classFieldSetter == null) {
-					desc.getClassField().set(current, element);
-				} else {
-					classFieldSetter.invoke(current, element);
-				}
-			} catch (SQLException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			} catch (IllegalArgumentException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			} catch (IllegalAccessException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			} catch (InvocationTargetException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
-		}
-	}
-
 	@SuppressWarnings("unchecked")
 	private static final <T> T makeAssignableFromString(TypeDescriptor<T> typeDesc, String value) throws SQLException {
 		if ( value == null ) return null;
@@ -737,32 +687,6 @@ public class AnnotatedRowMapper<ITEM>
 			} catch (ArrayParserException e) {
 				throw new SQLException(e);
 			}
-		}
-		try {
-			Object result =  expectedType.newInstance();
-			fillChildObject(result, expectedType, value);
-			return (T) result;
-
-		} catch (Exception e) {
-			logger.info("Result is not a class");
-		} 
-		if (List.class.isAssignableFrom( expectedType ) ) {
-			List<Object> result = new ArrayList<Object>();
-			List<String> values = null;
-			values = PostgresUtils.getArrayElements(value);
-			for (String currentValue : values) {
-				Object obj;
-				try {
-					Class<?> genericType = (Class<?>) typeDesc.getActualGenericParameterTypes()[0];
-					obj = genericType.newInstance();
-					fillChildObject(obj, genericType, currentValue);
-					result.add(obj);
-				} catch (Exception e) {
-					logger.warning("could not map generic type");
-				} 
-				
-			}
-			return (T) result;
 		}
 		throw new SQLException();
 	}

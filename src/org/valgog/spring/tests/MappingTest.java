@@ -16,10 +16,10 @@ import java.util.Properties;
 
 import org.apache.log4j.Logger;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.valgog.spring.AnnotatedRowMapper;
 import org.valgog.spring.tests.example.ComplexEmbed;
+import org.valgog.spring.tests.example.ListWithEmbed;
 import org.valgog.spring.tests.example.ParentClass;
 import org.valgog.spring.tests.example.SimpleClass;
 import org.valgog.spring.tests.example.ExtendedClass;
@@ -76,16 +76,15 @@ public class MappingTest {
 			"); \n" +			
 			"CREATE TYPE test.with_embed AS ( \n" +
 			"  x integer,\n" +
-			"  y integer\n" +
+			"  y integer,\n" +
+			"  z integer\n" +
 			"); \n" +
 			"CREATE TYPE test.complex_embed AS ( \n" +
 			"  x integer,\n" +
 			"  embed test.with_embed\n" +
 			"); \n" ;
-;
-;
 		s.execute(SQL);
-		// conn.commit();
+		//conn.commit();
 	}
 	
 	
@@ -193,12 +192,11 @@ public class MappingTest {
 			assertThat(1, is(row.getChildren().get(2).getChildren().get(0).getId()));
 		}
 	}		
-
+	
 	@Test
-	@Ignore
-	public void testEmbedWithName() throws SQLException {
+	public void testEmbedWithNameNoRow() throws SQLException {
 		
-		PreparedStatement ps = conn.prepareStatement("SELECT ROW(1, 2)::test.with_embed");
+		PreparedStatement ps = conn.prepareStatement("SELECT 1 as x, 2 as y, 3 as z");
 		ResultSet rs = ps.executeQuery();
 		AnnotatedRowMapper<WithEmbed> mapper = AnnotatedRowMapper.getMapperForClass(WithEmbed.class);
 		int i = 0;
@@ -207,14 +205,15 @@ public class MappingTest {
 			assertNotNull(result.getEmbed());
 			assertThat(1, is(result.getEmbed().getX()));
 			assertThat(2, is(result.getEmbed().getY()));
+			assertThat(3, is(result.getZ()));
 		}
 	}
 	
+	
 	@Test
-	@Ignore
 	public void testComplexEmbed() throws SQLException {
 		
-		PreparedStatement ps = conn.prepareStatement("SELECT 1 as x, ROW(1,2)::test.with_embed  as embed");
+		PreparedStatement ps = conn.prepareStatement("SELECT 1 as x, ROW(1,2,3)::test.with_embed  as embed");
 		ResultSet rs = ps.executeQuery();
 		AnnotatedRowMapper<ComplexEmbed> mapper = AnnotatedRowMapper.getMapperForClass(ComplexEmbed.class);
 		int i = 0;
@@ -223,6 +222,27 @@ public class MappingTest {
 			assertNotNull(result.getWithEmbed());
 			assertThat(1, is(result.getWithEmbed().getEmbed().getX()));
 			assertThat(2, is(result.getWithEmbed().getEmbed().getY()));
+			assertThat(3, is(result.getWithEmbed().getZ()));
+		}
+	}		
+	
+	@Test
+	public void testComplexArrayEmbed() throws SQLException {
+		
+		PreparedStatement ps = conn.prepareStatement("SELECT ARRAY[ROW(1,2,3)::test.with_embed, ROW(1,2,3)::test.with_embed]::test.with_embed[]  as embeds");
+		ResultSet rs = ps.executeQuery();
+		AnnotatedRowMapper<ListWithEmbed> mapper = AnnotatedRowMapper.getMapperForClass(ListWithEmbed.class);
+		int i = 0;
+		while( rs.next() ) {
+			ListWithEmbed result = mapper.mapRow(rs, i++);
+			assertNotNull(result.getList().get(0));
+			assertThat(1, is(result.getList().get(0).getEmbed().getX()));
+			assertThat(2, is(result.getList().get(0).getEmbed().getY()));
+			assertThat(3, is(result.getList().get(0).getZ()));
+			assertThat(1, is(result.getList().get(1).getEmbed().getX()));
+			assertThat(2, is(result.getList().get(1).getEmbed().getY()));
+			assertThat(3, is(result.getList().get(1).getZ()));
+			
 		}
 	}		
 	
