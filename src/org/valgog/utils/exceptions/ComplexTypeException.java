@@ -1,4 +1,4 @@
-package org.valgog.utils;
+package org.valgog.utils.exceptions;
 
 import java.sql.SQLException;
 

@@ -1,7 +1,7 @@
 /**
  * 
  */
-package org.valgog.utils;
+package org.valgog.utils.exceptions;
 
 /**
  * @author valgog

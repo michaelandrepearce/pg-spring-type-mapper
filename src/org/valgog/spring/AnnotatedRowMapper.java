@@ -2,12 +2,6 @@ package org.valgog.spring;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
-import java.lang.reflect.ParameterizedType;
-import java.lang.reflect.Type;
-import java.sql.Array;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -35,11 +29,14 @@ import org.valgog.spring.annotations.DatabaseField;
 import org.valgog.spring.annotations.DatabaseFieldNamePrefix;
 import org.valgog.spring.annotations.Embed;
 import org.valgog.spring.annotations.Optional;
+import org.valgog.spring.helpers.ClassFieldDescriptor;
+import org.valgog.spring.helpers.DatabaseFieldDescriptor;
+import org.valgog.spring.helpers.MappingOption;
+import org.valgog.spring.helpers.TypeDescriptor;
 import org.valgog.spring.helpers.exceptions.FieldDescriptionException;
-import org.valgog.spring.helpers.exceptions.TypeInstantiationException;
-import org.valgog.utils.ArrayParserException;
 import org.valgog.utils.PostgresUtils;
-import org.valgog.utils.RowParserException;
+import org.valgog.utils.exceptions.ArrayParserException;
+import org.valgog.utils.exceptions.RowParserException;
 
 /**
  * This class defines a database row mapper to be able to map hierarchy of classes with properties with defined setters, 
@@ -152,157 +149,6 @@ public class AnnotatedRowMapper<ITEM>
 	
 	private static final Map<Class<?>, List<? extends ClassFieldDescriptor<?, ?>>> mappingDescriptorCache = new HashMap<Class<?>, List<? extends ClassFieldDescriptor<?, ?>>>();
 	
-	private static class TypeDescriptor<T> {
-		final private Class<T> type;
-		final private Type genericType;
-		final private Type[] actualGenericParameterTypes;
-		
-		@SuppressWarnings("unchecked")
-		public TypeDescriptor(Field sourceField) {
-			this.type = (Class<T>) sourceField.getType();
-			this.genericType = sourceField.getGenericType();
-			if( genericType instanceof ParameterizedType ) {
-				ParameterizedType parameterizedType = (ParameterizedType) genericType;
-				this.actualGenericParameterTypes = parameterizedType.getActualTypeArguments();
-			} else {
-				this.actualGenericParameterTypes = null;
-			}
-		}
-		
-		public TypeDescriptor(Class<T> type) {
-			this.type = type;
-			this.genericType = null;
-			this.actualGenericParameterTypes = null;
-		}
-
-		public Class<T> getType() {
-			return type;
-		}
-
-		public Type getGenericType() {
-			return genericType;
-		}
-
-		public Type[] getActualGenericParameterTypes() {
-			return actualGenericParameterTypes;
-		}
-		
-		/**
-		 * Create an instance of the object of the given type
-		 * @return new instance of the object of the given type
-		 * @throws TypeInstantiationException 
-		 * is thrown if it is not possible to create an instance 
-		 * of the expected type
-		 */
-		public T newInstance() throws TypeInstantiationException {
-			try {
-				return type.newInstance();
-			} catch (Exception e) {
-				throw new TypeInstantiationException(type, e);
-			}
-		}
-		
-		/**
-		 * Returns component type of the array (if type is array) or of a Collection (if type is a subclass of Collection), 
-		 * otherwise it returns null
-		 * @return type of component or null
-		 */
-		@SuppressWarnings("unchecked")
-		public <C> Class<C> getComponentType() {
-			if ( type.isArray() ) {
-				return (Class<C>) type.getComponentType();
-			} else {
-				if ( Collection.class.isAssignableFrom(type) && actualGenericParameterTypes != null && actualGenericParameterTypes.length == 1 ) {
-					return (Class<C>) actualGenericParameterTypes[0];
-				} else {
-					return null;
-				}
-			}
-		}
-	}
-	
-	private static class ClassFieldDescriptor<C, T> extends TypeDescriptor<T> {
-		
-		final private Field classField;
-		final private Method classFieldSetter;
-		
-		public ClassFieldDescriptor(Field sourceField) throws FieldDescriptionException {
-			super(sourceField);
-			this.classField = sourceField;
-			// find the setter 
-			final String fieldName = sourceField.getName();
-			final Class<?> fieldType = sourceField.getType();
-			final Class<?> declaringClass = sourceField.getDeclaringClass();
-			Method setter = null;
-			try {
-				final String setterName = "set" + capitalize( fieldName );
-				setter = declaringClass.getDeclaredMethod(setterName, fieldType );
-			} catch (SecurityException securityException) {
-				throw new FieldDescriptionException( "Setter for the field " + declaringClass.getName() + '.' + fieldName + " could not be extracted: " + securityException.getMessage() );
-			} catch (NoSuchMethodException e) {
-				if ( ! Modifier.isPublic( classField.getModifiers() ) ) {
-					throw new FieldDescriptionException("Setter for non-public field " + declaringClass.getName() + '.' + fieldName + " could not be found");
-				}
-			}
-			this.classFieldSetter = setter;
-		}
-		
-		public void assignFieldValue(C objectInstance, T fieldValue) throws FieldDescriptionException {
-			try {
-				if ( this.classFieldSetter != null ) {
-					this.classFieldSetter.invoke(objectInstance, fieldValue);
-				} else {
-					this.classField.set(objectInstance, fieldValue);
-				}
-			} catch (IllegalArgumentException e) {
-				throw new FieldDescriptionException(e);
-			} catch (IllegalAccessException e) {
-				throw new FieldDescriptionException(e);
-			} catch (InvocationTargetException e) {
-				throw new FieldDescriptionException(e);
-			}
-		}
-		
-	}
-	
-	/**
-	 * Private class to hold information about mapping of some database column to a class field, used in {@link mappingDescriptorCache} cache.
-	 *
-	 */
-	private static class DatabaseFieldDescriptor<C, T> extends ClassFieldDescriptor<C, T> {
-
-		final private DataType databaseFieldType;
-		final private String databaseFieldName;
-		final private int databaseFieldIndex;
-		final private EnumSet<MappingOption> options;
-		
-		public DatabaseFieldDescriptor(Field classField, DataType databaseFieldType, String databaseFieldName, int databaseFieldIndex, Set<MappingOption> options) throws FieldDescriptionException {
-			super(classField);
-			this.databaseFieldType = databaseFieldType;
-			this.databaseFieldName = databaseFieldName;
-			this.databaseFieldIndex = databaseFieldIndex;
-			this.options = EnumSet.copyOf(options);
-		}
-
-		public DataType getDatabaseFieldType(){
-			return databaseFieldType;
-		}
-		public String getDatabaseFieldName() {
-			return databaseFieldName;
-		}
-		public int getDatabaseFieldIndex() {
-			return databaseFieldIndex;
-		}
-		public boolean is(MappingOption option) {
-			return options.contains(option);
-		}
-		
-	}
-	
-	private static enum MappingOption {
-		OPTIONAL, ALLOW_PRIMITIVE_DEFAULTS;
-	}
-
 	/**
 	 * This method can be used to extract the values of the annotated fields. 
 	 * Annotation should be done by the annotation {@link DatabaseField}.
@@ -512,19 +358,6 @@ public class AnnotatedRowMapper<ITEM>
 		}
 		return databaseFieldIndex;
 	}
-	
-	private static final String capitalize(String name) {
-		if (name == null || name.length() == 0) {
-			return name;
-		}
-		if (Character.isUpperCase(name.charAt(0))){
-			return name;
-		}
-		char chars[] = name.toCharArray();
-		chars[0] = Character.toUpperCase(chars[0]);
-		return new String(chars);
-		
-	}
 
 	private static final<C, T> T makeAssignable(Connection connection, DatabaseFieldDescriptor<C, T> typeDesc, Object value) throws SQLException {
 		return makeAssignable(connection, typeDesc, value, typeDesc.is(MappingOption.ALLOW_PRIMITIVE_DEFAULTS));
@@ -651,7 +484,7 @@ public class AnnotatedRowMapper<ITEM>
 			} else if ( Collection.class.isAssignableFrom(expectedType) ) {
 				final List<Object> newList;
 				if ( resultArray != null ) {
-					newList = Arrays.asList(resultArray);
+					newList = Arrays.asList( (Object[]) resultArray);
 				} else {
 					if ( ArrayList.class.equals(expectedType) ) {
 						// special case optimization here, not to recreate an ArrayList later

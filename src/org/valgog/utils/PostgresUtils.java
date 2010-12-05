@@ -7,7 +7,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import org.valgog.utils.RowParserException;
+import org.valgog.utils.exceptions.ArrayParserException;
+import org.valgog.utils.exceptions.RowParserException;
 
 /**
  * @author valgog
@@ -164,57 +165,5 @@ public class PostgresUtils {
 		}
 		return result;
 	}
-
-	public static List<String> getArrayElements(final String serializedArray) {
-
-		final List<String> elements = new ArrayList<String>();
-
-		int currentPositionInString = 0;
-
-		while (currentPositionInString != -1) {
-			currentPositionInString = fetchElement(currentPositionInString,
-					serializedArray, elements);
-		}
-
-		return elements;
-	}
-
-	private static int fetchElement(final int fromIndex,
-			final String serializedArray, final List<String> elements) {
-
-		int n = serializedArray.indexOf('(', fromIndex) + 1;
-
-		// we did not find something...
-		if (n == 0) {
-			return -1;
-		}
-
-		int depth = 0;
-
-		final StringBuffer elementBuffer = new StringBuffer().append('(');
-
-		while (n < serializedArray.length()) {
-
-			final char currentChar = serializedArray.charAt(n);
-
-			elementBuffer.append(currentChar);
-
-			if (currentChar == '(') {
-				depth++;
-			}
-			if (currentChar == ')' && depth == 0) {
-				break;
-			}
-			if (currentChar == ')' && depth != 0) {
-				depth--;
-			}
-
-			n++;
-		}
-
-		elements.add(elementBuffer.toString());
-
-		return n;
-	}
-
+	
 }

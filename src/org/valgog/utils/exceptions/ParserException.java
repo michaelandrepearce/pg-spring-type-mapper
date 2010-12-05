@@ -1,4 +1,4 @@
-package org.valgog.utils;
+package org.valgog.utils.exceptions;
 
 public class ParserException extends Exception {
 
