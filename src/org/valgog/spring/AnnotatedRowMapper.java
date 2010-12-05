@@ -12,6 +12,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -35,6 +36,7 @@ import org.valgog.spring.annotations.DatabaseFieldNamePrefix;
 import org.valgog.spring.annotations.Embed;
 import org.valgog.spring.annotations.Optional;
 import org.valgog.spring.helpers.exceptions.FieldDescriptionException;
+import org.valgog.spring.helpers.exceptions.TypeInstantiationException;
 import org.valgog.utils.ArrayParserException;
 import org.valgog.utils.PostgresUtils;
 import org.valgog.utils.RowParserException;
@@ -184,6 +186,39 @@ public class AnnotatedRowMapper<ITEM>
 		public Type[] getActualGenericParameterTypes() {
 			return actualGenericParameterTypes;
 		}
+		
+		/**
+		 * Create an instance of the object of the given type
+		 * @return new instance of the object of the given type
+		 * @throws TypeInstantiationException 
+		 * is thrown if it is not possible to create an instance 
+		 * of the expected type
+		 */
+		public T newInstance() throws TypeInstantiationException {
+			try {
+				return type.newInstance();
+			} catch (Exception e) {
+				throw new TypeInstantiationException(type, e);
+			}
+		}
+		
+		/**
+		 * Returns component type of the array (if type is array) or of a Collection (if type is a subclass of Collection), 
+		 * otherwise it returns null
+		 * @return type of component or null
+		 */
+		@SuppressWarnings("unchecked")
+		public <C> Class<C> getComponentType() {
+			if ( type.isArray() ) {
+				return (Class<C>) type.getComponentType();
+			} else {
+				if ( Collection.class.isAssignableFrom(type) && actualGenericParameterTypes != null && actualGenericParameterTypes.length == 1 ) {
+					return (Class<C>) actualGenericParameterTypes[0];
+				} else {
+					return null;
+				}
+			}
+		}
 	}
 	
 	private static class ClassFieldDescriptor<C, T> extends TypeDescriptor<T> {
@@ -291,7 +326,7 @@ public class AnnotatedRowMapper<ITEM>
 		// use the cache
 		for( ClassFieldDescriptor<ItemTYPE, Object> desc : descList ) {
 			Object value;
-			if ( desc instanceof DatabaseFieldDescriptor ) {
+			if ( DatabaseFieldDescriptor.class.isInstance(desc) ) {
 				DatabaseFieldDescriptor<ItemTYPE, Object> dbFieldDesc = (DatabaseFieldDescriptor<ItemTYPE, Object>) desc;
 				final DataType dataType = dbFieldDesc.getDatabaseFieldType();
 				final String fieldName = dbFieldDesc.getDatabaseFieldName();
@@ -312,16 +347,9 @@ public class AnnotatedRowMapper<ITEM>
 				// if the class field descriptor is not of type DatabaseTypeDescriptor,
 				// we suppose, that it is an embedded field Descriptor
 				// so we get extract fields of this field type 
-				// as if they whare the fields of itemClass
-				try {
-					value = desc.getType().newInstance();
-					extractAnnotatedFieldValuesFromResultSet( (Class<Object>) desc.getType(), value, rs );
-				} catch (InstantiationException e) {
-					logger.log(Level.SEVERE, "Could not instanciate class of type " + desc.getType().getName() + " using default constructor");
-					throw new FieldDescriptionException(e);
-				} catch (IllegalAccessException e) {
-					throw new FieldDescriptionException(e);
-				}
+				// as if they ware the fields of itemClass
+				value = desc.newInstance();
+				extractAnnotatedFieldValuesFromResultSet( (Class<Object>) desc.getType(), value, rs );
 			}
 			desc.assignFieldValue(item, value);
 		}
@@ -338,13 +366,13 @@ public class AnnotatedRowMapper<ITEM>
 		// use the cache
 		for( ClassFieldDescriptor<ItemTYPE, Object> desc : descList ) {
 			Object value;
-			if ( desc instanceof DatabaseFieldDescriptor ) {
+			if ( DatabaseFieldDescriptor.class.isInstance(desc) ) {
 				DatabaseFieldDescriptor<ItemTYPE, Object> dbFieldDesc = (DatabaseFieldDescriptor<ItemTYPE, Object>) desc;
 				
 				int databaseFieldIndex = dbFieldDesc.getDatabaseFieldIndex();
 				Object rawValue;
 				try {
-					rawValue = makeAssignableFromString( desc, stringList.get(databaseFieldIndex - 1));
+					rawValue = makeAssignable( null, dbFieldDesc, stringList.get(databaseFieldIndex - 1));
 				} catch (IndexOutOfBoundsException e) {
 					if ( dbFieldDesc.is(MappingOption.OPTIONAL) ) {
 						continue; // skip the optional field if not found in the result set
@@ -357,16 +385,9 @@ public class AnnotatedRowMapper<ITEM>
 				// if the class field descriptor is not of type DatabaseTypeDescriptor,
 				// we suppose, that it is an embedded field Descriptor
 				// so we get extract fields of this field type 
-				// as if they whare the fields of itemClass
-				try {
-					value = desc.getType().newInstance();
-					extractAnnotatedFieldValuesFromList( (Class<Object>) desc.getType(), value, stringList );
-				} catch (InstantiationException e) {
-					logger.log(Level.SEVERE, "Could not instanciate class of type " + desc.getType().getName() + " using default constructor");
-					throw new FieldDescriptionException(e);
-				} catch (IllegalAccessException e) {
-					throw new FieldDescriptionException(e);
-				}
+				// as if they were the fields of itemClass
+				value = desc.newInstance();
+				extractAnnotatedFieldValuesFromList( (Class<Object>) desc.getType(), value, stringList );
 			}
 			desc.assignFieldValue(item, value);
 		}
@@ -411,7 +432,7 @@ public class AnnotatedRowMapper<ITEM>
 	}
 
 	/**
-	 * This method retrospects given {@code itemClass} and fills a list of {@link MappingDesriptor} objects, that define field mappings
+	 * This method introspects given {@code itemClass} and fills a list of {@link MappingDesriptor} objects, that define field mappings
 	 * @param <ItemTYPE> source item class type
 	 * @param itemClass source item class
 	 * @param descList List of {@link MappingDesriptor} objects to filled with field mappings
@@ -521,6 +542,7 @@ public class AnnotatedRowMapper<ITEM>
 	@SuppressWarnings("unchecked")
 	private static final<T> T makeAssignable(Connection connection, TypeDescriptor<T> typeDesc, Object value, boolean allowPrimitiveDefaults) throws SQLException {
 		Class<T> expectedType = typeDesc.getType();
+		// take care of null values
 		if ( value == null ) { 
 			if ( expectedType.isPrimitive() ) {
 				// primitive types cannot be null, we have to rewrite the value to it's default?
@@ -548,31 +570,30 @@ public class AnnotatedRowMapper<ITEM>
 				if ( expectedType == Boolean.TYPE ) return (T) value;
 			} else if ( value instanceof Character ) {
 				if ( expectedType == Character.TYPE ) return (T) value;
-			} else if ( value instanceof CharSequence ) {
-				if ( expectedType == Character.TYPE ) {
-					// in case if we get a String and we expect a char, we transfer a first character only
-					CharSequence cs = (CharSequence) value;
-					if ( cs.length() > 0 ) {
-						Object c = cs.charAt(0);
-						return (T) c;
-					}
-				}
 			}
 		}
-				
+		
+		if ( CharSequence.class.isAssignableFrom(expectedType) ) {
+			return (T) value.toString();
+		}
+
 		// object is not compatible with the fieldType, will try to do something about that
-		// check if we are expecting an array
-		if ( expectedType.isArray() ) {
-			final Class<Object> arrayComponentType = (Class<Object>) expectedType.getComponentType();
-			final TypeDescriptor<Object> componentTypeDesc = new TypeDescriptor<Object>( arrayComponentType);
+		// check if we are expecting an array or a collection
+		final Class<Object> componentType = typeDesc.getComponentType();
+		if ( componentType != null ) {
+			final TypeDescriptor<Object> componentTypeDesc = new TypeDescriptor<Object>( componentType );
+
+			final Object resultArray;
+			final ArrayList<Object> resultList;
 			if ( value.getClass().isArray() ) {
-				// got java array, rewrite it's components into the expectedType components
+				// rewrite it's components into the expectedType components
 				final Object[] originalArray = (Object[]) value;
-				Object newArray = java.lang.reflect.Array.newInstance(arrayComponentType, originalArray.length );
+				resultArray = java.lang.reflect.Array.newInstance(componentType, originalArray.length );
+				resultList = null;
 				for (int i = 0; i < originalArray.length; i++) {
 					final Object element = originalArray[i];
 					try {
-						java.lang.reflect.Array.set(newArray, i, makeAssignable(connection, componentTypeDesc, element, allowPrimitiveDefaults) );
+						java.lang.reflect.Array.set(resultArray, i, makeAssignable(connection, componentTypeDesc, element, allowPrimitiveDefaults) );
 					} catch (IllegalArgumentException e) {
 						// we have a NULL value, that is being assigned to the primitive array element. That is not possible
 						// skipping this assignment will leave an element with a default value.
@@ -581,23 +602,80 @@ public class AnnotatedRowMapper<ITEM>
 						// or an exception will be already thrown
 					}
 				}
-				return (T) newArray;
 			} else if ( value instanceof java.sql.Array ) {
 				// extract JDDB Array and convert it into the expected type
 				java.sql.Array a = (java.sql.Array) value;
-				List<Object> l = new ArrayList<Object>();
+				resultArray = null;
+				resultList = new ArrayList<Object>();
 				ResultSet ars = a.getResultSet();
 				while( ars.next() ) {
-					l.add( makeAssignable( connection, componentTypeDesc, ars.getObject(2), allowPrimitiveDefaults ) );
+					resultList.add( makeAssignable( connection, componentTypeDesc, ars.getObject(2), allowPrimitiveDefaults ) );
 				}
-				// do some magic to re-pack the Object array into a primitive array
-				Object newArray = java.lang.reflect.Array.newInstance(arrayComponentType, l.size() );
-				for (int i = 0, j = l.size(); i < j; i++ ) {
-					java.lang.reflect.Array.set(newArray, i, l.get(i));
+			} else if ( value instanceof CharSequence ) {
+				final String stringValue = value.toString();
+				// try to extract the string value as if it were PostgreSQL serialized list
+				resultArray = null;
+				try {
+					List<String> stringList = PostgresUtils.postgresArray2StringList(stringValue);
+					final int z = stringList.size();
+					resultList = new ArrayList<Object>(z);
+					for (int i = 0; i < z; i++) {
+						String element = stringList.get(i);
+						resultList.add(makeAssignable(connection, componentTypeDesc, element, allowPrimitiveDefaults));
+					}
+					
+				} catch (ArrayParserException e) {
+					throw new SQLException(
+							String.format("Could not convert string [%s] to expected array or collection of type %s",
+									stringValue, componentType.getCanonicalName()),
+							e);
 				}
-				return (T) newArray;
+			} else {
+				throw new SQLException(
+						String.format("Could not convert value of type %s to expected array or collection of type %s",
+								value.getClass().getCanonicalName(), componentType.getCanonicalName())
+						);
 			}
-		}
+			// we extracted the value, so if we need an array, return it, if we need a collection, populate it and return it
+			if ( expectedType.isArray() ) {
+				if ( resultArray != null ) {
+					return (T) resultArray;
+				} else {
+					// convert resultList to array
+					Object newArray = java.lang.reflect.Array.newInstance(componentType, resultList.size() );
+					for (int i = 0, j = resultList.size(); i < j; i++ ) {
+						java.lang.reflect.Array.set(newArray, i, resultList.get(i));
+					}
+					return (T) newArray;
+				}
+			} else if ( Collection.class.isAssignableFrom(expectedType) ) {
+				final List<Object> newList;
+				if ( resultArray != null ) {
+					newList = Arrays.asList(resultArray);
+				} else {
+					if ( ArrayList.class.equals(expectedType) ) {
+						// special case optimization here, not to recreate an ArrayList later
+						return (T) resultList;
+					}
+					newList = resultList;
+				}
+				if ( List.class.equals(expectedType) ) {
+					return (T) newList;
+				} else if ( ArrayList.class.equals(expectedType) ) {
+					// special case optimization here, probably covering most of the use-cases
+					return (T) new ArrayList(newList);
+				} else if ( Set.class.equals(expectedType) || HashSet.class.equals(expectedType) ) {
+					return (T) new HashSet(newList);
+				} else {
+					// general use-case
+					Collection<Object> newExpectedList = (Collection<Object>) typeDesc.newInstance();
+					newExpectedList.addAll(newList);
+					return (T) newExpectedList;
+				}
+			} else {
+				throw new RuntimeException("Should never get here");
+			}
+		} // end if expected type is array or collection
 		
 		// try to map PGObject
 		// this should be probably a ROW type, that we will try to map to some expected type
@@ -608,7 +686,7 @@ public class AnnotatedRowMapper<ITEM>
 			String objectValue = ((PGobject)value).getValue();
 			// TODO: should implement adaptor based processor for PGobject values
 			try {
-				T newObject = expectedType.newInstance();
+				T newObject = typeDesc.newInstance();
 				// split the received ROW string to array of string representations of the field components
 				// and try to assign them to the expected type fields (using filed declaration index)
 				List<String> elementList = PostgresUtils.postgresROW2StringList(objectValue, 128);
@@ -616,11 +694,55 @@ public class AnnotatedRowMapper<ITEM>
 				return newObject;
 			} catch (RowParserException e) {
 				throw new SQLException("Could not parse provided PGObject value: " + objectValue, e);
-			} catch (InstantiationException e) {
-				throw new SQLException("Could not instansiate object of type " + expectedType.getCanonicalName(), e);
-			} catch (IllegalAccessException e) {
-				throw new SQLException("Could not instansiate object of type " + expectedType.getCanonicalName(), e);
-			} 
+			}
+		}
+		
+		// if the passed value is a string, try to map it to expected type
+		if ( value instanceof CharSequence ) {
+			
+			final String stringValue = value.toString();
+			
+			if ( expectedType == Boolean.TYPE || expectedType == Boolean.class ) {
+				final String b = stringValue.trim().toLowerCase(Locale.US);
+				if ( b.equals("true") || b.equals("t") || b.equals("1") ) {
+					return (T) Boolean.TRUE;
+				} else if ( b.equals("false") || b.equals("f") || b.equals("0") ) {
+					return (T) Boolean.FALSE;
+				} else {
+					throw new SQLException( String.format("Could not convert given string %s to Boolean", value) );
+				}
+			} else if ( expectedType == Character.TYPE || expectedType == Character.class ) {
+				return (T) Character.valueOf(stringValue.charAt(0));
+			} else if ( expectedType == Byte.TYPE || expectedType == Byte.class ) {
+				return (T) Byte.valueOf(stringValue);
+			} else if ( expectedType == Short.TYPE || expectedType == Short.class ) {
+				return (T) Short.valueOf(stringValue);
+			} else if ( expectedType == Integer.TYPE || expectedType == Integer.class ) {
+				return (T) Integer.valueOf(stringValue);
+			} else if ( expectedType == Long.TYPE || expectedType == Long.class ) {
+				return (T) Long.valueOf(stringValue);
+			} else if ( expectedType == Float.TYPE || expectedType == Float.class ) {
+				return (T) Float.valueOf(stringValue);
+			} else if ( expectedType == Double.TYPE || expectedType == Double.class ) {
+				return (T) Double.valueOf(stringValue);
+			} else {
+				// expected type is some general type here
+				// it is not an array or a collection, as it would be processed before
+				// so we will try to process the given string, as if it was a ROW representation
+				try {
+					T newObject = typeDesc.newInstance();
+					// split the received ROW string to array of string representations of the field components
+					// and try to assign them to the expected type fields (using filed declaration index)
+					List<String> elementList = PostgresUtils.postgresROW2StringList(stringValue, 128);
+					extractAnnotatedFieldValuesFromList(expectedType, newObject, elementList);
+					return newObject;
+				} catch (RowParserException e) {
+					throw new SQLException(
+							String.format("Could not convert recieved string [%s] into expected class %s",
+									stringValue, expectedType.getCanonicalName()), 
+							e);
+				}
+			}
 		}
 		
 		// now try to find a constructor, that will accept the given value (for example Integer(int) )
@@ -636,61 +758,6 @@ public class AnnotatedRowMapper<ITEM>
 		} 
 		throw new SQLException( String.format( "Can not map recieved object of type %s to expected type %s", value.getClass().getCanonicalName(), expectedType.getCanonicalName()));
 	}
-	
-	@SuppressWarnings("unchecked")
-	private static final <T> T makeAssignableFromString(TypeDescriptor<T> typeDesc, String value) throws SQLException {
-		if ( value == null ) return null;
-		Class<T> expectedType = typeDesc.getType();
-		if ( CharSequence.class.isAssignableFrom(expectedType) ) {
-			return (T) value.toString();
-		} else if ( expectedType.isPrimitive() ) {
-			if ( value.isEmpty() ) {
-				throw new SQLException( String.format("Expected primitive type %s cannot be converted from an empty string", expectedType.getCanonicalName()));
-			}
-		}
-		if ( expectedType == Boolean.TYPE || expectedType == Boolean.class ) {
-			final String b = value.trim().toLowerCase(Locale.US);
-			if ( b.equals("true") || b.equals("t") || b.equals("1") ) {
-				return (T) Boolean.TRUE;
-			} else if ( b.equals("false") || b.equals("f") || b.equals("0") ) {
-				return (T) Boolean.FALSE;
-			} else {
-				throw new SQLException( String.format("Could not convert given string %s to Boolean", value) );
-			}
-		} else if ( expectedType == Character.TYPE || expectedType == Character.class ) {
-			return (T) Character.valueOf(value.charAt(0));
-		} else if ( expectedType == Byte.TYPE || expectedType == Byte.class ) {
-			return (T) Byte.valueOf(value);
-		} else if ( expectedType == Short.TYPE || expectedType == Short.class ) {
-			return (T) Short.valueOf(value);
-		} else if ( expectedType == Integer.TYPE || expectedType == Integer.class ) {
-			return (T) Integer.valueOf(value);
-		} else if ( expectedType == Long.TYPE || expectedType == Long.class ) {
-			return (T) Long.valueOf(value);
-		} else if ( expectedType == Float.TYPE || expectedType == Float.class ) {
-			return (T) Float.valueOf(value);
-		} else if ( expectedType == Double.TYPE || expectedType == Double.class ) {
-			return (T) Double.valueOf(value);
-		} else if ( expectedType.isArray() ) {
-			Class<Object> arrayComponentType = (Class<Object>) expectedType.getComponentType();
-			// string should contain PostgreSQL array
-			try {
-				List<String> arrayElementValueList = PostgresUtils.postgresArray2StringList(value);
-				final int arraySize = arrayElementValueList.size();
-				T resultArray = (T) java.lang.reflect.Array.newInstance(arrayComponentType, arraySize );
-				for (int i = 0; i < arraySize; i++) {
-					String elementValue = arrayElementValueList.get(i);
-					if ( elementValue == null ) continue;
-					java.lang.reflect.Array.set(resultArray, i, makeAssignableFromString(new TypeDescriptor<Object>(arrayComponentType), elementValue));
-				}
-				return resultArray;
-			} catch (ArrayParserException e) {
-				throw new SQLException(e);
-			}
-		}
-		throw new SQLException();
-	}
-	
 	
 	public final ITEM mapRow(ResultSet rs, int rowNum) throws SQLException {
 		ITEM item = newItemInstance();

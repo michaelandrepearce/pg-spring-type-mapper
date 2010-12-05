@@ -18,7 +18,7 @@ public class SimpleClass {
 	@DatabaseField(name = "country_code", type=DataType.COMMON_TEXT)
 	private String countryCode;
 
-	@DatabaseField @AllowPrimitiveDefaults
+	@DatabaseField(type = DataType.SQL_ARRAY_INT4) @AllowPrimitiveDefaults
 	private int[] lastMarks;
 
 	@DatabaseField(name = "tags")

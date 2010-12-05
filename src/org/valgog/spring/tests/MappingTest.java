@@ -121,7 +121,13 @@ public class MappingTest {
 	@Test
 	public void testSingleMapRow() throws SQLException {
 		
-		PreparedStatement ps = conn.prepareStatement("SELECT 1 as id, 'Muster' as name, 'DE' as country_code, '{1,1,3,1,5}'::int4[] as last_marks, '{a,b,c,NULL,e}'::text[] as tags, NULL::text[] as generic_tags");
+		PreparedStatement ps = conn.prepareStatement(
+				"SELECT 1 as id, " +
+				"'Muster' as name, " +
+				"'DE' as country_code, " +
+				"'{1,1,3,1,5}'::int4[] as last_marks, " +
+				"'{a,b,c,NULL,e}'::text[] as tags, " +
+				"NULL::text[] as generic_tags");
 		ResultSet rs = ps.executeQuery();
 		AnnotatedRowMapper<SimpleClass> mapper = AnnotatedRowMapper.getMapperForClass(SimpleClass.class);
 		int i = 0;
@@ -174,7 +180,11 @@ public class MappingTest {
 	@Test
 	public void testRowMapRowComplex() throws SQLException {
 		
-		PreparedStatement ps = conn.prepareStatement("SELECT ARRAY[ROW(1, null, null)::test.child_type, ROW(2, ROW(1), null)::test.child_type, ROW(2, ROW(1), ARRAY[ROW(1)]::test.child_child_type[])::test.child_type]::test.child_type[] as children, ARRAY[ROW(1, null, null)::test.child_type, ROW(2, ROW(1), null)::test.child_type, ROW(2, ROW(1), ARRAY[ROW(1)]::test.child_child_type[])::test.child_type]::test.child_type[] as set");
+		PreparedStatement ps = conn.prepareStatement(
+				"SELECT ARRAY[ROW(1, null, null)::test.child_type, " +
+				"ROW(2, ROW(1), null)::test.child_type, " +
+				"ROW(2, ROW(1), ARRAY[ROW(1)]::test.child_child_type[])::test.child_type]::test.child_type[] as children, " +
+				"ARRAY[ROW(1, null, null)::test.child_type, ROW(2, ROW(1), null)::test.child_type, ROW(2, ROW(1), ARRAY[ROW(1)]::test.child_child_type[])::test.child_type]::test.child_type[] as set");
 		ResultSet rs = ps.executeQuery();
 		AnnotatedRowMapper<ParentClass> mapper = AnnotatedRowMapper.getMapperForClass(ParentClass.class);
 		int i = 0;
