@@ -24,6 +24,7 @@ import org.valgog.spring.tests.example.ParentClass;
 import org.valgog.spring.tests.example.SimpleClass;
 import org.valgog.spring.tests.example.ExtendedClass;
 import org.valgog.spring.tests.example.SimpleRowClass;
+import org.valgog.spring.tests.example.SimpleWithMap;
 import org.valgog.spring.tests.example.WithEmbed;
 
 public class MappingTest {
@@ -256,5 +257,16 @@ public class MappingTest {
 		}
 	}		
 	
-
+	@Test
+	public void testSimpleHashMapEmbed() throws SQLException {
+		
+		PreparedStatement ps = conn.prepareStatement(
+				"SELECT hstore('key1', 'value1') as simple_map");
+		ResultSet rs = ps.executeQuery();
+		AnnotatedRowMapper<SimpleWithMap> mapper = AnnotatedRowMapper.getMapperForClass(SimpleWithMap.class);
+		int i = 0;
+		while( rs.next() ) {
+			SimpleWithMap result = mapper.mapRow(rs, i++);
+		}
+	}
 }
