@@ -516,6 +516,7 @@ public class AnnotatedRowMapper<ITEM>
 		// we will try to map using field indexes
 		if ( value instanceof PGobject ) {
 			// get a string representation of the PGobject (is that really efficient?)
+			String objectType = ((PGobject)value).getType();
 			String objectValue = ((PGobject)value).getValue();
 			// TODO: should implement adaptor based processor for PGobject values
 			try {
