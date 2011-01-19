@@ -1,11 +1,10 @@
-package org.valgog.utils;
+package org.valgog.utils.postgres;
 
-import java.io.InvalidClassException;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
-import java.util.NoSuchElementException;
 import java.util.Map.Entry;
+import java.util.NoSuchElementException;
 
 import org.postgresql.util.PGobject;
 import org.valgog.utils.exceptions.HStoreParseException;
@@ -24,6 +23,7 @@ public class HStore extends PGobject implements Iterable<Map.Entry<String, Strin
 
 	public HStore() {
 		this.type = "hstore";
+		this.length = 0;
 	}
 	
 	public void setValue(String rawValue) {
@@ -34,8 +34,13 @@ public class HStore extends PGobject implements Iterable<Map.Entry<String, Strin
 	
 	public Map<String,String> asMap() {
 		HashMap<String, String> r = new HashMap<String, String>();
-		for(Entry<String, String> e : this ) {
-			r.put(e.getKey(), e.getValue());
+		try {
+			for (final HStoreIterator iterator = new HStoreIterator(); iterator.hasNext();) {
+				final HStoreEntry entry = iterator.rawNext();
+				r.put(entry.key, entry.value);
+			}
+		} catch (HStoreParseException e) {
+			throw new IllegalStateException(e);
 		}
 		return r;
 	}
@@ -94,18 +99,22 @@ public class HStore extends PGobject implements Iterable<Map.Entry<String, Strin
 		public boolean hasNext() {
 			return nextEntry != null;
 		}
-	
-		@Override
-		public Entry<String, String> next() throws NoSuchElementException, IllegalStateException {
+
+		private HStoreEntry rawNext() throws NoSuchElementException, HStoreParseException {
 			if (nextEntry == null)
 				throw new NoSuchElementException();
 			lastReturned = nextEntry;
+			advance();
+			return lastReturned;
+		}
+		
+		@Override
+		public Entry<String, String> next() throws NoSuchElementException, IllegalStateException {
 			try {
-				advance();
+				return rawNext();
 			} catch (HStoreParseException e) {
 				throw new IllegalStateException(e);
 			}
-			return lastReturned;
 		}
 	
 		/**

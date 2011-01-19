@@ -10,8 +10,8 @@ import java.util.Map;
 
 import org.junit.Before;
 import org.junit.Test;
-import org.valgog.utils.HStore;
 import org.valgog.utils.exceptions.HStoreParseException;
+import org.valgog.utils.postgres.HStore;
 
 public class HStoreTest {
 
