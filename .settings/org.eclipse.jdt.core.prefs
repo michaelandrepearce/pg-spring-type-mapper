@@ -1,18 +1,6 @@
-#Thu Nov 25 21:57:38 CET 2010
-encoding//src=UTF-8
-org.eclipse.jdt.core.compiler.debug.localVariable=generate
-org.eclipse.jdt.core.compiler.compliance=1.6
-org.eclipse.jdt.core.compiler.codegen.unusedLocal=preserve
-encoding//src/main/resources=UTF-8
-encoding//src/test/resources=UTF-8
-encoding//src/test/java=UTF-8
-org.eclipse.jdt.core.compiler.debug.sourceFile=generate
-org.eclipse.jdt.core.compiler.problem.forbiddenReference=warning
-org.eclipse.jdt.core.compiler.codegen.targetPlatform=1.6
-org.eclipse.jdt.core.compiler.problem.enumIdentifier=error
-org.eclipse.jdt.core.compiler.debug.lineNumber=generate
+#Thu Feb 24 17:49:20 CET 2011
 eclipse.preferences.version=1
-org.eclipse.jdt.core.compiler.codegen.inlineJsrBytecode=enabled
-encoding/src=UTF-8
+org.eclipse.jdt.core.compiler.codegen.targetPlatform=1.6
+org.eclipse.jdt.core.compiler.compliance=1.6
+org.eclipse.jdt.core.compiler.problem.forbiddenReference=warning
 org.eclipse.jdt.core.compiler.source=1.6
-org.eclipse.jdt.core.compiler.problem.assertIdentifier=error

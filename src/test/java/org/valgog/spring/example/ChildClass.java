@@ -1,4 +1,4 @@
-package org.valgog.spring.tests.example;
+package org.valgog.spring.example;
 
 import java.util.List;
 

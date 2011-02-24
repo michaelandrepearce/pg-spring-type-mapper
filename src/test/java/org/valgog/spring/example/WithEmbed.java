@@ -1,4 +1,4 @@
-package org.valgog.spring.tests.example;
+package org.valgog.spring.example;
 
 import org.valgog.spring.annotations.DatabaseField;
 import org.valgog.spring.annotations.Embed;

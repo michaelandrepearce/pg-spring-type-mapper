@@ -1,4 +1,4 @@
-package org.valgog.spring.tests;
+package org.valgog.spring;
 
 import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.assertEquals;
@@ -18,14 +18,14 @@ import org.apache.log4j.Logger;
 import org.junit.Before;
 import org.junit.Test;
 import org.valgog.spring.AnnotatedRowMapper;
-import org.valgog.spring.tests.example.ComplexEmbed;
-import org.valgog.spring.tests.example.ListWithEmbed;
-import org.valgog.spring.tests.example.ParentClass;
-import org.valgog.spring.tests.example.SimpleClass;
-import org.valgog.spring.tests.example.ExtendedClass;
-import org.valgog.spring.tests.example.SimpleRowClass;
-import org.valgog.spring.tests.example.SimpleWithMap;
-import org.valgog.spring.tests.example.WithEmbed;
+import org.valgog.spring.example.ComplexEmbed;
+import org.valgog.spring.example.ListWithEmbed;
+import org.valgog.spring.example.ParentClass;
+import org.valgog.spring.example.SimpleClass;
+import org.valgog.spring.example.ExtendedClass;
+import org.valgog.spring.example.SimpleRowClass;
+import org.valgog.spring.example.SimpleWithMap;
+import org.valgog.spring.example.WithEmbed;
 
 public class MappingTest {
 	

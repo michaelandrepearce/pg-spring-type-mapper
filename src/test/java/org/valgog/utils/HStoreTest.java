@@ -1,4 +1,4 @@
-package org.valgog.utils.tests;
+package org.valgog.utils;
 
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.nullValue;
