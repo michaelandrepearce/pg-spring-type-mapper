@@ -25,9 +25,7 @@ public class PostgresUtils {
 			int appendStringSize) throws ArrayParserException {
 		if (!(value.startsWith("{") && value.endsWith("}")))
 			throw new ArrayParserException(
-					String
-							.format(
-									"postgresArray2StringList() ARRAY must begin with '{' and ends with '}': %s",
+					String.format("postgresArray2StringList() ARRAY must begin with '{' and ends with '}': %s",
 									value));
 		if (value.length() == 2) {
 			return Collections.emptyList();
