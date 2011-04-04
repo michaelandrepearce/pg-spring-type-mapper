@@ -26,6 +26,12 @@ public class TypeConverterFactory {
 		}
 	}
 	
+	/**
+	 * Marker interface, to be used for primitive type converters for getting 
+	 * default value to be used in case of passing null value input string
+	 *
+	 * @param <N>
+	 */
 	static interface NeedsDefaultForNullValue<N> {
 		public N getDefaultForNullValue();
 	}
